@@ -146,7 +146,6 @@ All contracts are built using:
 
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   rustup target add wasm32-unknown-unknown
    ```
 
 2. **Install Stellar CLI**:
@@ -184,8 +183,12 @@ All contracts are built using:
 2. **Build all contracts**:
 
    ```bash
-   cargo build --target wasm32-unknown-unknown --release
+   stellar contract build
    ```
+
+   This builds every workspace contract for `wasm32v1-none` and
+   optimizes each WASM artifact by default. Artifacts are written to
+   `target/wasm32v1-none/release/`.
 
 3. **Run tests**:
    ```bash
@@ -345,14 +348,13 @@ For deploying individual contracts:
 
 ```bash
 # Build specific contract
-cd contracts/<contract-name>
 stellar contract build
 
 # Upload WASM
 stellar contract upload \
   --network testnet \
   --source <account_name> \
-  --wasm target/wasm32-unknown-unknown/release/<contract>.wasm
+  --wasm target/wasm32v1-none/release/<contract>.wasm
 
 # Deploy contract
 stellar contract deploy \
@@ -469,7 +471,7 @@ See `.env.example` for all available configuration options.
 1. **Make changes** to contract source code
 2. **Build contract**:
    ```bash
-   cargo build --target wasm32-unknown-unknown --release
+   stellar contract build
    ```
 3. **Run tests**:
    ```bash

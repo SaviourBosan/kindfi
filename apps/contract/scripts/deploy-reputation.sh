@@ -131,12 +131,10 @@ fi
 # Step 1: Build Reputation contract
 echo ""
 echo "=== Step 1: Building Reputation Contract ==="
-cd contracts/reputation
 stellar contract build || {
     echo "Failed to build Reputation Contract"
     exit 1
 }
-cd ../..
 echo "Reputation Contract built successfully!"
 
 # Step 2: Upload WASM
