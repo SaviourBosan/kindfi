@@ -133,7 +133,7 @@ fi
 # Step 1: Build Quest contract
 echo ""
 echo "=== Step 1: Building Quest Contract ==="
-stellar contract build || {
+cargo build --target wasm32-unknown-unknown --release --manifest-path ./contracts/quest/Cargo.toml || {
     echo "🔴 Failed to build Quest Contract"
     exit 1
 }
@@ -145,7 +145,7 @@ echo "=== Step 2: Uploading WASM ==="
 QUEST_WASM_HASH=$(stellar contract upload \
     --network "$NETWORK" \
     --source "$SOURCE" \
-    --wasm target/wasm32v1-none/release/quest.wasm)
+    --wasm target/wasm32-unknown-unknown/release/quest.wasm)
 
 echo "WASM Hash: $QUEST_WASM_HASH"
 

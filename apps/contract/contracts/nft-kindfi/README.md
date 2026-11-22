@@ -334,11 +334,8 @@ KindfiNFT::burn(&env, owner, token_id);
 
 ```bash
 cd apps/contract
-stellar contract build
+cargo build --target wasm32-unknown-unknown --release -p nft-kindfi
 ```
-
-The optimized WASM is written to
-`target/wasm32v1-none/release/nft_kindfi.wasm`.
 
 ## Testing
 

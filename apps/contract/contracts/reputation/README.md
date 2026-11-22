@@ -525,11 +525,8 @@ Reputation::register_user_nft(&env, recorder, user, token_id);
 
 ```bash
 cd apps/contract
-stellar contract build
+cargo build --target wasm32-unknown-unknown --release -p reputation
 ```
-
-The optimized WASM is written to
-`target/wasm32v1-none/release/reputation.wasm`.
 
 ## Testing
 

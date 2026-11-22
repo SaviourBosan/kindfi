@@ -34,7 +34,7 @@ use account_factory::{events::AccountDeployEventData, AccountFactory, AccountFac
 mod account_contract_mod {
     use super::Context;
     soroban_sdk::contractimport!(
-        file = "../../../target/wasm32v1-none/release/account_contract.wasm"
+        file = "../../../target/wasm32-unknown-unknown/release/account_contract.wasm"
     );
 }
 mod base64_url;
