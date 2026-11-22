@@ -26,7 +26,7 @@ fn gen_random_bytes<const N: usize>(env: &Env) -> BytesN<N> {
 // The contract that will be deployed by the deployer contract.
 mod contract {
     soroban_sdk::contractimport!(
-        file = "../../../target/wasm32-unknown-unknown/release/account_contract.wasm"
+        file = "../../../target/wasm32v1-none/release/account_contract.wasm"
     );
 }
 
