@@ -32,14 +32,7 @@ use crate::types::{QuestDefinition, QuestProgress, QuestType};
 // Constants
 // ============================================================================
 
-/// Number of ledgers in a day (assuming ~5 second block time)
-const DAY_IN_LEDGERS: u32 = 17280;
-
-/// TTL extension amount for instance storage (30 days)
-const INSTANCE_TTL_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
-
-/// TTL threshold before extending (29 days)
-const INSTANCE_TTL_THRESHOLD: u32 = INSTANCE_TTL_AMOUNT - DAY_IN_LEDGERS;
+use kindfi_ttl::{INSTANCE_TTL_AMOUNT, INSTANCE_TTL_THRESHOLD};
 
 /// Role identifier for addresses that can create quests.
 pub const ADMIN_ROLE: &str = "admin";

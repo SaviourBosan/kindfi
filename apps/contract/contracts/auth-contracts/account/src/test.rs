@@ -8,7 +8,9 @@ use rand::RngCore;
 use soroban_sdk::{log, symbol_short};
 
 // use soroban_sdk::auth::{Context, ContractContext};
-use soroban_sdk::testutils::{Address as _, BytesN as _, Events as _};
+use soroban_sdk::testutils::{
+    storage::Instance as _, Address as _, BytesN as _, Events as _, Ledger as _,
+};
 use soroban_sdk::{Address, Bytes, BytesN, Env, IntoVal, Val};
 
 // use crate::errors::Error;
@@ -122,6 +124,33 @@ fn test_add_device() {
     client.add_device(&device_id, &public_key);
 
     assert_eq!(client.get_devices().len(), 2);
+}
+
+#[test]
+fn test_device_write_bumps_instance_ttl() {
+    let Account {
+        env,
+        account_address,
+        client,
+        ..
+    } = Account::new();
+
+    env.ledger().set_sequence_number(400_000);
+
+    let ttl_before = env.as_contract(&account_address, || {
+        env.storage().instance().get_ttl()
+    });
+
+    let device_id = generate_device_id(&env);
+    let (_, _, public_key) = generate_keypair(&env);
+    client.add_device(&device_id, &public_key);
+
+    let ttl_after = env.as_contract(&account_address, || {
+        env.storage().instance().get_ttl()
+    });
+
+    assert!(ttl_after > ttl_before);
+    assert_eq!(ttl_after, kindfi_ttl::INSTANCE_TTL_AMOUNT);
 }
 
 #[test]
