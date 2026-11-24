@@ -6,6 +6,7 @@ use soroban_sdk::{
 pub mod events;
 
 use crate::events::{AccountDeployEventData, ACCOUNT, DEPLOY};
+use kindfi_ttl::extend_instance_ttl;
 
 #[contract]
 pub struct AccountFactory;
@@ -34,6 +35,7 @@ impl AccountFactory {
 
         env.storage().instance().set(&AUTH_CONTRACT, &auth_contract);
         env.storage().instance().set(&NATIVE_TOKEN, &native_token);
+        extend_instance_ttl(&env);
     }
 
     pub fn deploy(
@@ -83,6 +85,7 @@ impl AccountFactory {
                 account: address.clone(),
             },
         );
+        extend_instance_ttl(&env);
 
         Ok(address)
     }

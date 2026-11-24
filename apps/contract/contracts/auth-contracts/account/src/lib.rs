@@ -2,7 +2,7 @@
 use soroban_sdk::{
     auth::{Context, CustomAccountInterface},
     contract, contractimpl, contracttype,
-    crypto::Hash,
+    crypto::Hash, log,
     panic_with_error, symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 mod base64_url;
@@ -16,6 +16,7 @@ use crate::events::{
 };
 
 use crate::errors::Error;
+use kindfi_ttl::extend_instance_ttl;
 
 #[contract]
 pub struct AccountContract;
@@ -63,6 +64,7 @@ impl AccountContract {
         env.storage().instance().set(&STORAGE_KEY_DEVICES, &devices);
         env.storage().instance().set(&AUTH_CONTRACT, &auth_contract);
         env.storage().instance().set(&NATIVE_TOKEN, &native_token);
+        extend_instance_ttl(&env);
     }
 
     pub fn add_device(env: Env, device_id: BytesN<32>, public_key: BytesN<65>) {
@@ -83,6 +85,7 @@ impl AccountContract {
         });
 
         env.storage().instance().set(&STORAGE_KEY_DEVICES, &devices);
+        extend_instance_ttl(&env);
 
         env.events().publish(
             (DEVICE, ADDED),
@@ -112,6 +115,7 @@ impl AccountContract {
         }
 
         env.storage().instance().set(&STORAGE_KEY_DEVICES, &devices);
+        extend_instance_ttl(&env);
 
         env.events()
             .publish((DEVICE, REMOVED), DeviceRemovedEventData { device_id });
@@ -136,6 +140,7 @@ impl AccountContract {
         }
 
         env.storage().instance().set(&RECOVERY_ADDRESS, &address);
+        extend_instance_ttl(&env);
 
         env.events().publish(
             (ACCOUNT, SECURITY, ADDED),
@@ -156,6 +161,7 @@ impl AccountContract {
         auth_contract.require_auth();
 
         env.storage().instance().set(&RECOVERY_ADDRESS, &address);
+        extend_instance_ttl(&env);
 
         env.events().publish(
             (ACCOUNT, SECURITY, UPDATED),
@@ -188,6 +194,7 @@ impl AccountContract {
         });
 
         env.storage().instance().set(&STORAGE_KEY_DEVICES, &devices);
+        extend_instance_ttl(&env);
 
         env.events().publish(
             (ACCOUNT, SECURITY),

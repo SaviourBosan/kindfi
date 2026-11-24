@@ -30,19 +30,11 @@ use crate::storage::{
     set_permission_threshold, set_points, set_user_level, set_user_nft_token_id,
 };
 use crate::types::{EventType, Level, ReputationEventRecord, ThresholdType};
+use kindfi_ttl::{INSTANCE_TTL_AMOUNT, INSTANCE_TTL_THRESHOLD};
 
 // ============================================================================
 // Constants
 // ============================================================================
-
-/// Number of ledgers in a day (assuming ~5 second block time)
-const DAY_IN_LEDGERS: u32 = 17280;
-
-/// TTL extension amount for instance storage (30 days)
-const INSTANCE_TTL_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
-
-/// TTL threshold before extending (29 days)
-const INSTANCE_TTL_THRESHOLD: u32 = INSTANCE_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 /// Role identifier for addresses that can record reputation events.
 pub const RECORDER_ROLE: &str = "recorder";

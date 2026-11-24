@@ -1,6 +1,8 @@
 use soroban_sdk::{Address, Env, Vec};
 
 use crate::types::{QuestDefinition, QuestProgress, StorageKey};
+use kindfi_ttl::PERSISTENT_TTL_THRESHOLD;
+use kindfi_ttl::PERSISTENT_TTL_AMOUNT;
 
 /// Check if contract is initialized.
 pub fn is_initialized(e: &Env) -> bool {
@@ -66,7 +68,7 @@ pub fn set_quest_progress(e: &Env, user: &Address, progress: &QuestProgress) {
     // Extend TTL for persistent storage (30 days)
     e.storage()
         .persistent()
-        .extend_ttl(&StorageKey::UserQuestProgress(user.clone(), progress.quest_id), 518400, 518400);
+        .extend_ttl(&StorageKey::UserQuestProgress(user.clone(), progress.quest_id), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
 }
 
 /// Get user's completed quest IDs.
@@ -88,7 +90,7 @@ pub fn add_user_completed_quest(e: &Env, user: &Address, quest_id: u32) {
     // Extend TTL
     e.storage()
         .persistent()
-        .extend_ttl(&StorageKey::UserCompletedQuests(user.clone()), 518400, 518400);
+        .extend_ttl(&StorageKey::UserCompletedQuests(user.clone()), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
 }
 
 /// Get next quest ID and increment.
