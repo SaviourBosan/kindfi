@@ -12,6 +12,7 @@
  * in `gamification-contracts.ts`.
  */
 
+import { SorobanSubmissionError, submitSorobanTx } from '@packages/lib/stellar'
 import {
 	Account,
 	Address,
@@ -110,14 +111,12 @@ interface SubmitContractCallOptions {
 	args: xdr.ScVal[]
 	/** Keypair that signs the transaction (recorder, or admin for admin calls). */
 	signer: Keypair
-	/** When true, poll until the transaction is included or fails. */
-	waitForConfirmation?: boolean
 }
 
 type SubmitContractCallResult = GamificationTxResult<{
 	simulation?: Api.SimulateTransactionSuccessResponse
 	sendStatus?: Api.SendTransactionResponse['status']
-	/** Return value of the confirmed transaction, when confirmation was awaited. */
+	/** Return value from the confirmed transaction. */
 	returnValue?: xdr.ScVal
 }>
 
@@ -148,54 +147,16 @@ export class GamificationContractWrites {
 		this.client = client
 	}
 
-	/** Poll until a submitted transaction is included or fails (mainnet can be slow). */
-	private async waitForSubmittedTransaction(
-		hash: string,
-		maxAttempts = 30,
-		intervalMs = 2000,
-	): Promise<{ success: boolean; error?: string; returnValue?: xdr.ScVal }> {
-		for (let attempt = 0; attempt < maxAttempts; attempt++) {
-			const tx = await this.client.server.getTransaction(hash)
-
-			if (tx.status === Api.GetTransactionStatus.SUCCESS) {
-				// A confirmed Soroban invocation carries its return value
-				// (parsed from resultMetaXdr by the SDK) — callers that need
-				// the confirmed result must use this, not the simulation.
-				return { success: true, returnValue: tx.returnValue }
-			}
-
-			if (tx.status === Api.GetTransactionStatus.FAILED) {
-				return { success: false, error: 'Transaction failed on-chain' }
-			}
-
-			if (attempt < maxAttempts - 1) {
-				await new Promise((resolve) => setTimeout(resolve, intervalMs))
-			}
-		}
-
-		return { success: false, error: 'Transaction confirmation timeout' }
-	}
-
 	/**
 	 * Shared submit path for every gamification write: build the contract
-	 * invocation, simulate it, assemble, sign, and send via RPC.
-	 *
-	 * `DUPLICATE` is treated as submitted, matching the previous per-method
-	 * behaviour: the hash is returned and the caller can confirm inclusion
-	 * with `getTransaction`. `TRY_AGAIN_LATER` is different — the
-	 * transaction was rejected, not enqueued — so the same signed transaction
-	 * is resent up to 3 times with backoff, and a distinguishable failure
-	 * (with the hash) is returned when the retries are exhausted. A hash
-	 * alone is never proof of acceptance.
+	 * invocation, simulate it, assemble and sign it, then submit and confirm
+	 * it through the shared Soroban transaction helper.
 	 */
 	private async submitContractCall(
 		options: SubmitContractCallOptions,
 	): Promise<SubmitContractCallResult> {
-		const { contractAddress, functionName, args, signer, waitForConfirmation } = options
-		// Hash of the transaction once RPC has accepted it. Kept outside
-		// the try so the catch can return it: a failure after submission
-		// (for example a confirmation lookup that throws) must still let
-		// callers reconcile a transaction the network may have accepted.
+		const { contractAddress, functionName, args, signer } = options
+		// Keep the confirmed hash if shaping the result fails after submission.
 		let submittedTxHash: string | undefined
 		try {
 			const sourceAccount = await this.client.server
@@ -229,74 +190,26 @@ export class GamificationContractWrites {
 			const assembledTx = assembleTransaction(transaction, simulation).build()
 			assembledTx.sign(signer)
 
-			// TRY_AGAIN_LATER means the transaction was not enqueued: resend
-			// the same signed transaction, bounded, with backoff.
-			const maxSendAttempts = 3
-			let result = await this.client.server.sendTransaction(assembledTx)
-			let sendAttempts = 1
-			while (result.status === 'TRY_AGAIN_LATER' && sendAttempts < maxSendAttempts) {
-				logger.warn(
-					`[GamificationContractService] sendTransaction TRY_AGAIN_LATER, retrying (${sendAttempts}/${maxSendAttempts - 1})...`,
-				)
-				await new Promise((resolve) => setTimeout(resolve, sendAttempts * 1000))
-				result = await this.client.server.sendTransaction(assembledTx)
-				sendAttempts++
-			}
-
-			if (result.status === 'TRY_AGAIN_LATER') {
-				logger.error(
-					'[GamificationContractService] Transaction rejected with TRY_AGAIN_LATER after retries:',
-					result,
-				)
-				return {
-					success: false,
-					txHash: result.hash,
-					error: 'Transaction rejected with TRY_AGAIN_LATER after retries; not enqueued',
-					simulation,
-					sendStatus: result.status,
-				}
-			}
-
-			if (result.status === 'ERROR') {
-				logger.error('[GamificationContractService] Transaction failed:', result)
-				return {
-					success: false,
-					error: `Transaction failed: ${JSON.stringify(result)}`,
-				}
-			}
-
-			// The transaction was accepted (PENDING/DUPLICATE): from here
-			// on, any failure — including a confirmation lookup that
-			// throws — must keep the hash for reconciliation.
-			submittedTxHash = result.hash
-
-			let returnValue: xdr.ScVal | undefined
-			if (waitForConfirmation) {
-				const confirmation = await this.waitForSubmittedTransaction(result.hash)
-				if (!confirmation.success) {
-					return {
-						success: false,
-						txHash: result.hash,
-						error: confirmation.error,
-						simulation,
-						sendStatus: result.status,
-					}
-				}
-				returnValue = confirmation.returnValue
-			}
+			const submission = await submitSorobanTx(this.client.server, assembledTx, {
+				pollAttempts: 30,
+				pollIntervalMs: 2000,
+			})
+			submittedTxHash = submission.txHash
 
 			return {
 				success: true,
-				txHash: result.hash,
+				txHash: submission.txHash,
 				simulation,
-				sendStatus: result.status,
-				returnValue,
+				sendStatus: submission.sendStatus,
+				returnValue: submission.transaction.returnValue,
 			}
 		} catch (error) {
 			logger.error('[GamificationContractService] Error submitting contract call:', error)
+			const txHash =
+				submittedTxHash ?? (error instanceof SorobanSubmissionError ? error.txHash : undefined)
 			return {
 				success: false,
-				...(submittedTxHash ? { txHash: submittedTxHash } : {}),
+				...(txHash ? { txHash } : {}),
 				error: error instanceof Error ? error.message : 'Unknown error',
 			}
 		}
@@ -472,7 +385,6 @@ export class GamificationContractWrites {
 					functionName: 'create_referral',
 					args,
 					signer: this.client.recorderKeypair,
-					waitForConfirmation: true,
 				})
 
 				if (!result.success) {
@@ -624,7 +536,6 @@ export class GamificationContractWrites {
 					functionName: 'create_quest',
 					args,
 					signer: adminKeypair,
-					waitForConfirmation: true,
 				})
 
 				if (!result.success) {
@@ -859,7 +770,6 @@ export class GamificationContractWrites {
 					functionName: 'grant_role',
 					args,
 					signer: adminKeypair,
-					waitForConfirmation: true,
 				})
 
 				if (!result.success) {

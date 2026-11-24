@@ -19,6 +19,7 @@ import {
 	type PasskeyTxContext,
 } from '../../stellar/passkey-transaction.utils'
 import { type RateLimitConfig, SignatureRateLimiter } from '../../stellar/rate-limiter'
+import { submitSorobanTx } from '../../stellar/submit-soroban-tx'
 import type { AppEnvInterface } from '../../types'
 
 /**
@@ -205,50 +206,15 @@ export class StellarPasskeyService {
 			const assembledTx = assembleTransaction(transaction, simulation).build()
 			assembledTx.sign(this.fundingKeypair)
 
-			const result = await this.server.sendTransaction(assembledTx)
+			const { transaction: txResult } = await submitSorobanTx(this.server, assembledTx)
+			const returnValue = txResult.returnValue
 
-			if (result.status === 'ERROR') {
-				throw new Error(`Deployment failed: ${JSON.stringify(result)}`)
+			if (!returnValue) {
+				throw new Error('No return value from deployment')
 			}
 
-			let attempts = 0
-			const maxAttempts = 60
-
-			while (attempts < maxAttempts) {
-				await new Promise((resolve) => setTimeout(resolve, 1000))
-				attempts++
-
-				try {
-					const txResult = await this.server.getTransaction(result.hash)
-
-					if (txResult.status === Api.GetTransactionStatus.SUCCESS) {
-						// Extract contract address from result
-						// The factory.deploy() returns Address type
-						const returnValue = txResult.returnValue
-
-						if (!returnValue) {
-							throw new Error('No return value from deployment')
-						}
-
-						// Parse the Address from ScVal
-						const contractAddress = Address.fromScVal(returnValue).toString()
-
-						return contractAddress
-					}
-
-					if (txResult.status === Api.GetTransactionStatus.FAILED) {
-						throw new Error(
-							'Deployment failed. Check if auth-controller contract is properly deployed and initialized.',
-						)
-					}
-				} catch (error) {
-					if (attempts === maxAttempts) {
-						throw error
-					}
-				}
-			}
-
-			throw new Error('Deployment timeout')
+			// Parse the Address from ScVal
+			return Address.fromScVal(returnValue).toString()
 		} catch (error) {
 			// Provide actionable error message
 			if (

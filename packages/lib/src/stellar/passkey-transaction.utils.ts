@@ -8,6 +8,7 @@ import {
 	xdr,
 } from '@stellar/stellar-sdk'
 import { Api, assembleTransaction, type Server } from '@stellar/stellar-sdk/rpc'
+import { submitSorobanTx } from './submit-soroban-tx'
 
 /**
  * Runtime dependencies a passkey transaction needs, supplied by the caller
@@ -101,43 +102,11 @@ export async function submitTransaction(
 
 	// Submit transaction to Soroban RPC (NOT Horizon)
 	// Soroban transactions with authorization entries must use sendTransaction
-	const sendResult = await server.sendTransaction(assembledTransaction)
-
-	if (sendResult.status === 'ERROR') {
-		throw new Error('Transaction submission failed')
-	}
-
-	if (sendResult.status === 'PENDING') {
-		// Wait for transaction to be included in a ledger
-		let attempts = 0
-		const maxAttempts = 120 // 2 minutes for complex auth transactions
-
-		while (attempts < maxAttempts) {
-			await new Promise((resolve) => setTimeout(resolve, 10000))
-			attempts++
-
-			try {
-				const txResult = await server.getTransaction(sendResult.hash)
-
-				if (txResult.status === Api.GetTransactionStatus.SUCCESS) {
-					return sendResult.hash
-				}
-
-				if (txResult.status === Api.GetTransactionStatus.FAILED) {
-					throw new Error('Transaction failed')
-				}
-
-				if (txResult.status === Api.GetTransactionStatus.NOT_FOUND) {
-				}
-
-				// Still pending, continue waiting
-			} catch (_error) {}
-		}
-
-		throw new Error('Transaction timed out waiting for confirmation')
-	}
-
-	return sendResult.hash
+	const { txHash } = await submitSorobanTx(server, assembledTransaction, {
+		pollAttempts: 120,
+		pollIntervalMs: 10000,
+	})
+	return txHash
 }
 
 /**
