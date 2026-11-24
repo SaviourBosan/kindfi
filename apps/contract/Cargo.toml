@@ -2,7 +2,6 @@
 resolver = "2"
 
 members = [
-  "contracts/ttl",
   # Auth contracts
   "contracts/auth-contracts/account",
   "contracts/auth-contracts/account-factory",
@@ -45,7 +44,6 @@ version = "0.1.0"
 
 [workspace.dependencies]
 soroban-sdk = "23.4.0"
-kindfi-ttl = { path = "contracts/ttl" }
 stellar-access = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.6.0" }
 stellar-macros = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.6.0" }
 stellar-tokens = { git = "https://github.com/OpenZeppelin/stellar-contracts", tag = "v0.6.0" }

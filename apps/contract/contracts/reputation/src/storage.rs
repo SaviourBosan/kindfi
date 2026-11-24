@@ -1,5 +1,4 @@
 use soroban_sdk::{Address, Env, Vec};
-use kindfi_ttl::{PERSISTENT_TTL_AMOUNT, PERSISTENT_TTL_THRESHOLD};
 
 use crate::types::{
     EventType, Level, ReputationEventRecord, StorageKey, ThresholdType,
@@ -8,6 +7,11 @@ use crate::types::{
     DEFAULT_QUEST_COMPLETION_POINTS, DEFAULT_REFERRAL_POINTS, DEFAULT_STREAK_DONATION_POINTS,
     DIAMOND_THRESHOLD, GOLD_THRESHOLD, ROOKIE_THRESHOLD, SILVER_THRESHOLD,
 };
+
+/// TTL constants (30 days in ledgers, assuming ~5 second block time)
+const DAY_IN_LEDGERS: u32 = 17280;
+const PERSISTENT_TTL_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+const PERSISTENT_TTL_THRESHOLD: u32 = PERSISTENT_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 // ============================================================================
 // Points Storage

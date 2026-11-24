@@ -17,7 +17,6 @@ use crate::events::{
 };
 
 use crate::errors::Error;
-use kindfi_ttl::extend_instance_ttl;
 
 #[derive(serde::Deserialize)]
 struct ClientDataJson<'a> {
@@ -78,7 +77,6 @@ impl AuthController {
             &DataKey::DefaultThreshold.into_val(&env),
             &default_threshold,
         );
-        extend_instance_ttl(&env);
 
         env.events().publish(
             (SECURITY, INIT),
@@ -109,7 +107,6 @@ impl AuthController {
         env.storage()
             .instance()
             .set::<Val, Vec<BytesN<65>>>(&DataKey::Signers.into_val(&env), &signers);
-        extend_instance_ttl(&env);
 
         env.events()
             .publish((SIGNER, ADDED), SignerAddedEventData { signer });
@@ -142,7 +139,6 @@ impl AuthController {
         env.storage()
             .instance()
             .set::<Val, Vec<BytesN<65>>>(&DataKey::Signers.into_val(&env), &signers);
-        extend_instance_ttl(&env);
 
         env.events()
             .publish((SIGNER, REMOVED), SignerRemovedEventData { signer });
@@ -172,7 +168,6 @@ impl AuthController {
         env.storage()
             .instance()
             .set::<Val, u32>(&DataKey::DefaultThreshold.into_val(&env), &threshold);
-        extend_instance_ttl(&env);
 
         env.events().publish(
             (SECURITY, UPDATED),
@@ -211,7 +206,6 @@ impl AuthController {
                 .instance()
                 .set::<Val, Address>(&DataKey::Factory(ctx).into_val(&env), &factory);
         }
-        extend_instance_ttl(&env);
 
         env.events()
             .publish((FACTORY, ADDED), FactoryAddedEventData { factory, context });
@@ -239,7 +233,6 @@ impl AuthController {
                 .instance()
                 .remove::<Val>(&DataKey::Factory(ctx).into_val(&env));
         }
-        extend_instance_ttl(&env);
 
         env.events().publish(
             (FACTORY, REMOVED),
@@ -265,7 +258,6 @@ impl AuthController {
                 .instance()
                 .set::<Val, Address>(&DataKey::Account(ctx).into_val(&env), &account);
         }
-        extend_instance_ttl(&env);
 
         env.events()
             .publish((ACCOUNT, ADDED), AccountAddedEventData { account, context });
@@ -285,7 +277,6 @@ impl AuthController {
                 .instance()
                 .remove::<Val>(&DataKey::Account(ctx).into_val(&env));
         }
-        extend_instance_ttl(&env);
 
         env.events().publish(
             (ACCOUNT, REMOVED),
