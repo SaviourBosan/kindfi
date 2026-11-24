@@ -1,98 +1,52 @@
 'use client'
 
 import { ReactQueryClientProvider } from '@packages/lib/providers'
-import { development, TrustlessWorkConfig } from '@trustless-work/escrow'
 import type { Session } from 'next-auth'
 import { SessionProvider } from 'next-auth/react'
 import { ThemeProvider as NextThemesProvider } from 'next-themes'
 import { useEffect } from 'react'
-import { logger } from '@/lib/logger'
-import { StellarProvider } from '~/hooks/contexts/stellar-context'
-import { EscrowProvider } from '~/hooks/contexts/use-escrow.context'
 import { WalletProvider } from '~/hooks/contexts/use-stellar-wallet.context'
 import { WaitlistProvider } from '~/hooks/contexts/use-waitlist.context'
 import { AuthProvider } from '~/hooks/use-auth'
 import { I18nProvider } from '~/lib/i18n/context'
-import { translations } from '~/lib/i18n/translations'
+import { registerNotificationServiceWorker } from '~/lib/notifications/browser-permission'
+import { KindfiPollarProvider } from '~/lib/pollar/provider'
 
 interface ProvidersProps {
 	children: React.ReactNode
 	initSession: Session | null
 }
 
-interface ServiceWorkerRegistrationWithSync extends ServiceWorkerRegistration {
-	periodicSync?: {
-		register(tag: string, options: { minInterval: number }): Promise<void>
-	}
-}
-
 export function Providers({ children, initSession }: ProvidersProps) {
 	useEffect(() => {
-		if ('serviceWorker' in navigator) {
-			navigator.serviceWorker
-				.register('/notification-worker.js', {
-					scope: '/',
-				})
-				.then((registration) => {
-					// Request notification permission
-					if ('Notification' in window) {
-						Notification.requestPermission().then((permission) => {
-							if (permission === 'granted') {
-							}
-						})
-					}
-
-					// Set up periodic sync if supported
-					try {
-						const reg = registration as ServiceWorkerRegistrationWithSync
-						if (reg.periodicSync) {
-							// reg.periodicSync
-							// 	.register('notification-sync', {
-							// 		minInterval: 24 * 60 * 60 * 1000, // 24 hours
-							// 	})
-							// 	.catch((error) => {
-							// 	})
-						}
-					} catch (error) {
-						logger.error('Periodic sync not supported:', error)
-					}
-				})
-				.catch((error) => {
-					logger.error('Service worker registration failed:', error)
-				})
-		}
+		// Registration only. Notification permission is requested from an explicit
+		// opt-in control (see NotificationPermissionCard), never on page load.
+		void registerNotificationServiceWorker()
 	}, [])
-
-	// Use development API until mainnet release (post-Stellar audit).
-	// When ready for mainnet: import mainNet, then use:
-	// trustlessBaseUrl = process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'mainnet' ? mainNet : development
-	const trustlessBaseUrl = development
 
 	return (
 		<ReactQueryClientProvider>
-			<I18nProvider translations={translations}>
+			<I18nProvider>
 				<NextThemesProvider
 					attribute="class"
 					defaultTheme="light"
 					forcedTheme="light"
 					disableTransitionOnChange
 				>
-					<SessionProvider session={initSession}>
-						<AuthProvider initSession={initSession}>
-							<WaitlistProvider>
-								<TrustlessWorkConfig
-									baseURL={trustlessBaseUrl}
-									apiKey={process.env.NEXT_PUBLIC_TRUSTLESS_WORK_API_KEY || ''}
-								>
-									<WalletProvider>
-										<EscrowProvider>
-											<StellarProvider>{children}</StellarProvider>
-										</EscrowProvider>
-									</WalletProvider>
-								</TrustlessWorkConfig>
-							</WaitlistProvider>
-						</AuthProvider>
-					</SessionProvider>
+					{/* Keep Pollar outside SessionProvider so session key changes do not remount the SDK (avoids session/resume 429s). */}
+					<KindfiPollarProvider>
+						<SessionProvider
+							key={initSession?.user?.id ?? 'guest'}
+							session={initSession ?? undefined}
+							refetchOnWindowFocus
+						>
+							<AuthProvider initSession={initSession}>
+								<WalletProvider>
+									<WaitlistProvider>{children}</WaitlistProvider>
+								</WalletProvider>
+							</AuthProvider>
+						</SessionProvider>
+					</KindfiPollarProvider>
 				</NextThemesProvider>
 			</I18nProvider>
 		</ReactQueryClientProvider>

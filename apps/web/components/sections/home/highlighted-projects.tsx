@@ -34,13 +34,17 @@ const fadeUp = (delay = 0) => ({
 
 export function HighlightedProjects() {
 	const [waitlistOpen, setWaitlistOpen] = useState(false)
-	const { t } = useI18n()
+	const { t, language } = useI18n()
 	const {
 		data: projects = [],
 		isLoading,
 		error,
-	} = useSupabaseQuery('highlighted-projects', (client) =>
-		getAllProjects(client, [], 'most-recent', 6),
+	} = useSupabaseQuery(
+		'highlighted-projects',
+		(client) => getAllProjects(client, [], 'most-recent', 6, { viewerLocale: language }),
+		{
+			additionalKeyValues: [language],
+		},
 	)
 
 	const {
@@ -117,13 +121,13 @@ export function HighlightedProjects() {
 							aria-label="Featured Projects"
 						>
 							<CarouselContent className="-ml-3 md:-ml-4">
-								{projects.map((project, index) => (
+								{projects.map((project) => (
 									<CarouselItem
 										key={project.id}
 										className="pl-3 md:pl-4 basis-full md:basis-1/2 xl:basis-1/3"
 										aria-roledescription="slide"
 									>
-										<ProjectCardGrid project={project} index={index} />
+										<ProjectCardGrid project={project} />
 									</CarouselItem>
 								))}
 							</CarouselContent>

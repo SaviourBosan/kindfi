@@ -189,6 +189,11 @@ RESEND_API_KEY=your_resend_key
 DIDIT_API_KEY=your_didit_api_key
 DIDIT_WEBHOOK_SECRET=your_didit_webhook_secret
 
+# KYC enforcement (server-only; keep disabled in production)
+# Requires a redeploy / process restart to take effect.
+KYC_ENFORCEMENT_MODE=disabled
+KYC_ENFORCED_ACTIONS=send_assets,use_off_ramp
+
 # Other
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
@@ -257,6 +262,29 @@ The app supports WebAuthn passkeys for passwordless authentication:
 - Milestone-based releases require verification
 - Dispute resolution system for conflicts
 
+### Admin Operations Dashboard
+
+`/admin` is an action-oriented operations dashboard for platform admins:
+
+- **Action center**: pending-work queues (project reviews, missing escrows,
+  milestone reviews, KYC cases, disputed escrows, new users) with direct
+  resolution actions, plus platform metrics that link to pre-filtered views.
+- **Server-side lists**: projects, escrows, and users are searched, filtered,
+  sorted, and paginated in the database via `/api/admin/*` routes guarded by
+  `requireAdminApi()`. All list state lives in the URL so views can be
+  bookmarked and shared.
+- **Feature flag**: the redesigned interface is gated by
+  `NEXT_PUBLIC_ADMIN_OPS_DASHBOARD` (always on in development). Setting it to
+  `false` in production instantly restores the legacy admin UI — the legacy
+  components are untouched.
+- **Safety**: high-impact actions (milestone review decisions, campaign
+  status changes, escrow deploy/fund/release, gamification triggers,
+  governance round creation, backfills) require an explicit confirmation
+  dialog that shows the state change and, for blockchain mutations, the
+  active Stellar network and connected signer. Consequential admin actions
+  are recorded in `public.audit_logs` (operations prefixed `admin_*`) via the
+  server-only `recordAdminAudit()` helper.
+
 ### KYC Verification
 
 Identity verification powered by [Didit](https://didit.me/), an AI-native identity verification platform:
@@ -285,6 +313,51 @@ bun test
 ```
 
 Test files are located in the `test/` directory.
+
+### Production build smoke check
+
+Pull requests that change `apps/web`, its shared `packages/lib`,
+`packages/drizzle`, or `services/supabase` workspaces run the production build
+with Bun 1.3.14. The check uses only build-time placeholders:
+
+| Variable | Build-only value |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://build-smoke.invalid` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `build-smoke-placeholder-anon-key` |
+| `NEXT_PUBLIC_KYC_API_BASE_URL` | `https://build-smoke.invalid` |
+| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` |
+| `NEXTAUTH_URL` | `http://localhost:3000` |
+| `NEXTAUTH_SECRET` | `build-smoke-placeholder-not-a-secret` |
+| `NEXT_PUBLIC_APP_ENV` | `production` |
+
+These values satisfy build-time configuration only; they are not credentials
+and must not be used to run the app. The `.invalid` hosts prevent the
+placeholders from targeting live services. The workflow does not provision,
+authenticate to, or mutate Supabase, Stellar, KYC, or other external services.
+Linting and type checking remain separate diagnostics.
+
+To reproduce locally from the repository root, install dependencies and run:
+
+```powershell
+bun install
+cd apps/web
+$env:NEXT_PUBLIC_SUPABASE_URL = "https://build-smoke.invalid"
+$env:NEXT_PUBLIC_SUPABASE_ANON_KEY = "build-smoke-placeholder-anon-key"
+$env:NEXT_PUBLIC_KYC_API_BASE_URL = "https://build-smoke.invalid"
+$env:NEXT_PUBLIC_APP_URL = "http://localhost:3000"
+$env:NEXTAUTH_URL = "http://localhost:3000"
+$env:NEXTAUTH_SECRET = "build-smoke-placeholder-not-a-secret"
+$env:NEXT_PUBLIC_APP_ENV = "production"
+bun scripts/test-build-boundary.ts
+bun run build
+```
+
+The boundary check runs a deliberately broken fixture in
+`test/fixtures/server-client-boundary`: a client page imports a module marked
+`server-only`. It passes only when `next build` rejects that fixture for the
+server/client boundary violation. The fixture is isolated from the real app
+build; its passing result does not mask or substitute for the separate
+`bun run build` result.
 
 ## 🎨 Design System
 
@@ -343,6 +416,20 @@ bun start
 ### Environment Variables
 
 Ensure all production environment variables are set in your deployment platform (Vercel, etc.).
+
+### Stellar discovery metadata
+
+Edit [`docs/stellar/stellar.toml`](../../docs/stellar/stellar.toml) as the source
+of truth. The production domain owner will serve it at
+`https://<domain>/.well-known/stellar.toml`, on the same host as `ORG_URL`,
+with `Access-Control-Allow-Origin: *`.
+
+<!-- Issuer constants: apps/web/lib/constants/escrow.ts -->
+The manifest records the default mainnet and testnet USDC issuers from
+[`lib/constants/escrow.ts`](./lib/constants/escrow.ts). The
+`${NEXT_PUBLIC_USDC_CONTRACT_ADDRESS}` placeholder documents the
+deployment-specific override in a comment. See the
+[Stellar standards map](../../docs/stellar/standards.md) for the related SEPs.
 
 ## 📚 Learn More
 

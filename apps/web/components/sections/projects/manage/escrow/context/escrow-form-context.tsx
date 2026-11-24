@@ -25,6 +25,7 @@ interface EscrowFormContextValue {
 	removeMilestone: (id: string) => void
 	updateMilestone: (index: number, patch: Partial<MilestoneItem>) => void
 	convertMilestones: (type: EscrowType) => void
+	fillRolesFromWallet: (address: string) => void
 }
 
 const EscrowFormContext = createContext<EscrowFormContextValue | undefined>(undefined)
@@ -70,7 +71,6 @@ export function EscrowFormProvider({ children, initialData }: EscrowFormProvider
 		disputeResolver: walletAddress ?? '',
 		platformAddress: walletAddress ?? '',
 		receiver: walletAddress ?? '',
-		platformFee: '',
 		amount: '',
 		receiverMemo: '',
 		description,
@@ -79,12 +79,12 @@ export function EscrowFormProvider({ children, initialData }: EscrowFormProvider
 				? [
 						{
 							id: genId(),
-							description: 'Milestone 1',
+							description: 'Release 1',
 							amount: '',
 							receiver: walletAddress ?? '',
 						},
 					]
-				: [{ id: genId(), description: 'Milestone 1' }],
+				: [{ id: genId(), description: 'Release 1' }],
 	}))
 
 	const setField = useCallback(
@@ -100,11 +100,11 @@ export function EscrowFormProvider({ children, initialData }: EscrowFormProvider
 				prev.selectedEscrowType === 'multi-release'
 					? {
 							id: genId(),
-							description: `Milestone ${prev.milestones.length + 1}`,
+							description: `Release ${prev.milestones.length + 1}`,
 							amount: '' as const,
 							receiver: '',
 						}
-					: { id: genId(), description: `Milestone ${prev.milestones.length + 1}` }
+					: { id: genId(), description: `Release ${prev.milestones.length + 1}` }
 			return { ...prev, milestones: [...prev.milestones, next] }
 		})
 	}, [])
@@ -143,6 +143,22 @@ export function EscrowFormProvider({ children, initialData }: EscrowFormProvider
 		}))
 	}, [])
 
+	const fillRolesFromWallet = useCallback((address: string) => {
+		setFormData((prev) => ({
+			...prev,
+			approver: address,
+			serviceProvider: address,
+			releaseSigner: address,
+			disputeResolver: address,
+			platformAddress: address,
+			receiver: address,
+			milestones:
+				prev.selectedEscrowType === 'multi-release'
+					? prev.milestones.map((m) => ('receiver' in m ? { ...m, receiver: address } : m))
+					: prev.milestones,
+		}))
+	}, [])
+
 	const value = useMemo(
 		() => ({
 			formData,
@@ -152,6 +168,7 @@ export function EscrowFormProvider({ children, initialData }: EscrowFormProvider
 			removeMilestone,
 			updateMilestone,
 			convertMilestones,
+			fillRolesFromWallet,
 		}),
 		[
 			formData,
@@ -161,6 +178,7 @@ export function EscrowFormProvider({ children, initialData }: EscrowFormProvider
 			removeMilestone,
 			updateMilestone,
 			convertMilestones,
+			fillRolesFromWallet,
 		],
 	)
 

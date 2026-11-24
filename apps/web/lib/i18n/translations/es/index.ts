@@ -11,8 +11,10 @@ import { home } from './home'
 import { language } from './language'
 import { nav } from './nav'
 import { news } from './news'
+import { onboarding } from './onboarding'
 import { profile } from './profile'
 import { projects } from './projects'
+import { tutorials } from './tutorials'
 import { user } from './user'
 import { waitlist } from './waitlist'
 
@@ -32,6 +34,8 @@ export const es = {
 	profile,
 	about,
 	news,
+	tutorials,
 	waitlist,
 	footer,
+	onboarding,
 }

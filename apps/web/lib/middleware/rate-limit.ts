@@ -38,20 +38,17 @@
  * ## Protected routes
  *
  * ### High priority — `strict` (3 req/min, 1 h block)
- * - `POST /api/escrow/fund`
- * - `POST /api/escrow/initialize`
- * - `POST /api/escrow/dispute`
- * - `POST /api/escrow/review`
- * - `POST /api/escrow/sign-and-submit`
  * - `POST /api/contributions/create`
  * - `POST /api/governance/vote`
  * - `POST /api/kyc/didit/create-session`
+ * - `POST /api/kyc/authorize`
  *
  * ### Medium priority — `moderate` (10 req/min, 30 min block)
  * - `POST /api/comments`
  * - `POST /api/foundations/create`
  * - `POST /api/projects/create`
  * - `POST /api/notifications/push`
+ * - `GET  /api/kyc/status`
  *
  * ### Previously protected
  * - `POST /api/nfts/mint` (strict)

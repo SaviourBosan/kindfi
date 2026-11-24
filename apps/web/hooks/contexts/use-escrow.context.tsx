@@ -41,7 +41,7 @@ import {
 	useStartDispute,
 	useUpdateEscrow,
 } from '@trustless-work/escrow'
-import { createContext, useContext, useMemo } from 'react'
+import { createContext, useCallback, useContext, useMemo } from 'react'
 
 interface EscrowActionsContext {
 	// initialize
@@ -121,7 +121,12 @@ export function EscrowProvider({ children }: { children: React.ReactNode }) {
 	const { updateEscrow } = useUpdateEscrow()
 	const { startDispute } = useStartDispute()
 	const { resolveDispute } = useResolveDispute()
-	const { getMultipleBalances } = useGetMultipleEscrowBalances()
+	const { getMultipleBalances: getMultipleBalancesMutation } = useGetMultipleEscrowBalances()
+
+	const getMultipleBalances = useCallback(
+		(payload: GetBalanceParams, _type: EscrowType) => getMultipleBalancesMutation(payload),
+		[getMultipleBalancesMutation],
+	)
 	const { releaseFunds } = useReleaseFunds()
 	const { fundEscrow } = useFundEscrow()
 	const { changeMilestoneStatus } = useChangeMilestoneStatus()
@@ -169,6 +174,11 @@ export function useEscrow() {
 	const ctx = useContext(EscrowContext)
 	if (!ctx) throw new Error('useEscrow must be used within EscrowProvider')
 	return ctx
+}
+
+/** Returns escrow actions when available; null when EscrowProvider is not mounted. */
+export function useOptionalEscrow(): EscrowActionsContext | null {
+	return useContext(EscrowContext) ?? null
 }
 
 export type { EscrowActionsContext }

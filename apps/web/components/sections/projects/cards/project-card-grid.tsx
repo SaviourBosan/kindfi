@@ -4,49 +4,66 @@
 import { motion } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useMemo } from 'react'
-import { Badge } from '~/components/base/badge'
-import { CategoryBadge } from '~/components/sections/projects/shared'
-import { useEscrowBalance } from '~/hooks/escrow/use-escrow-balance'
+import {
+	AcceptingDonationsBadge,
+	CategoryBadge,
+	ProjectTagList,
+	ReleasedProgressBar,
+} from '~/components/sections/projects/shared'
+import { useProjectFundingDisplay } from '~/hooks/projects/use-project-funding-display'
+import { useProjectReleasedDisplay } from '~/hooks/projects/use-project-released-display'
 import { cardHover, progressBarAnimation } from '~/lib/constants/animations'
 import { useI18n } from '~/lib/i18n'
+import {
+	DEFAULT_PROJECT_THUMBNAIL_LOADING,
+	type ProjectThumbnailLoading,
+	resolveProjectThumbnailImageProps,
+} from '~/lib/projects/project-thumbnail-loading'
 import type { Project } from '~/lib/types/project'
-import { cn } from '~/lib/utils'
-import { getContrastTextColor } from '~/lib/utils/color-utils'
 
 interface ProjectCardGridProps {
 	project: Project
-	/** Pass index from parent to set priority loading for first 6 cards (above-fold). */
-	index?: number
+	/**
+	 * Loading policy for the thumbnail, decided by the page. Omit it to keep the
+	 * image lazy, which never preloads.
+	 */
+	thumbnailLoading?: ProjectThumbnailLoading
 }
 
-export function ProjectCardGrid({ project, index = 0 }: ProjectCardGridProps) {
+export function ProjectCardGrid({
+	project,
+	thumbnailLoading = DEFAULT_PROJECT_THUMBNAIL_LOADING,
+}: ProjectCardGridProps) {
+	const thumbnailImageProps = resolveProjectThumbnailImageProps(thumbnailLoading)
 	const { t } = useI18n()
-	const { balance: onChainRaised } = useEscrowBalance({
+	const { displayRaised, progressPercent, formatCurrency } = useProjectFundingDisplay({
 		escrowContractAddress: project.escrowContractAddress,
-		escrowType: 'multi-release',
+		escrowType: project.escrowType,
+		goal: project.goal,
+		raised: project.raised,
 	})
 
-	const displayRaised = useMemo(
-		() => onChainRaised ?? project.raised,
-		[onChainRaised, project.raised],
-	)
+	const { displayReleased, releasedProgressPercent } = useProjectReleasedDisplay({
+		escrowContractAddress: project.escrowContractAddress,
+		escrowType: project.escrowType,
+		goal: project.goal,
+		dbReleasedAmount: project.releasedAmount,
+	})
 
-	const progressPercentage = Math.min(Math.round((displayRaised / project.goal) * 100), 100)
+	const progressPercentage = progressPercent
+	const isLoadingProgress = progressPercentage === null
+	const barProgressPercent = progressPercentage ?? 0
 
 	const imageSrc = project.image || '/images/placeholder.png'
 
 	return (
 		<Link
 			href={`/projects/${project.slug}`}
-			className="h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-xl"
+			className="long-list-item h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-xl"
 		>
 			<motion.article
 				className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-200/80 hover:shadow-lg"
 				whileHover={cardHover}
-				initial={{ opacity: 0, y: 20 }}
-				animate={{ opacity: 1, y: 0 }}
-				transition={{ duration: 0.3 }}
 			>
 				<div className="relative h-48 overflow-hidden">
 					<Image
@@ -55,20 +72,14 @@ export function ProjectCardGrid({ project, index = 0 }: ProjectCardGridProps) {
 						fill
 						className="object-cover transition-transform duration-500 ease-out group-hover:scale-105"
 						sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
-						priority={index < 6}
-						loading={index >= 6 ? 'lazy' : undefined}
+						{...thumbnailImageProps}
 					/>
 					<div className="absolute inset-0 bg-gradient-to-t from-black/40 via-black/0 to-black/0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-					<div className="absolute top-3 left-3 flex flex-col gap-2 drop-shadow">
-						{project.category && <CategoryBadge category={project.category} />}
-						{project.escrowContractAddress && (
-							<Badge
-								className="rounded-full border-0 bg-emerald-600/90 px-1.5 py-0.5 text-[9px] font-medium text-white"
-								aria-label={t('projects.acceptingDonations')}
-							>
-								{t('projects.acceptingDonations')}
-							</Badge>
-						)}
+					<div className="absolute top-3 left-3 right-3 flex max-w-full flex-wrap items-center gap-1.5 drop-shadow">
+						{project.category ? (
+							<CategoryBadge category={project.category} variant="display" />
+						) : null}
+						{project.escrowContractAddress ? <AcceptingDonationsBadge /> : null}
 					</div>
 					<div className="absolute inset-0 flex items-end justify-end p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
 						<span className="inline-flex items-center gap-1 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-gray-900 shadow-sm backdrop-blur">
@@ -91,14 +102,17 @@ export function ProjectCardGrid({ project, index = 0 }: ProjectCardGridProps) {
 					<div
 						className="w-full bg-gray-100 rounded-full h-1.5 sm:h-2 shadow-inner"
 						role="progressbar"
-						aria-valuenow={progressPercentage}
+						aria-valuenow={barProgressPercent}
 						aria-valuemin={0}
 						aria-valuemax={100}
-						aria-label={`${progressPercentage}% funded`}
+						aria-busy={isLoadingProgress}
+						aria-label={
+							isLoadingProgress ? 'Loading funding progress' : `${barProgressPercent}% funded`
+						}
 					>
 						<motion.div
 							className="h-full rounded-full gradient-progress shadow-sm"
-							custom={progressPercentage}
+							custom={barProgressPercent}
 							variants={progressBarAnimation}
 							initial="initial"
 							animate="animate"
@@ -107,15 +121,19 @@ export function ProjectCardGrid({ project, index = 0 }: ProjectCardGridProps) {
 
 					<div className="flex justify-between text-sm text-gray-500 mb-3 tabular-nums">
 						<span>
-							{new Intl.NumberFormat(undefined, {
-								style: 'currency',
-								currency: 'USD',
-								maximumFractionDigits: 0,
-							}).format(displayRaised)}{' '}
+							{displayRaised === null
+								? '…'
+								: formatCurrency(displayRaised, { maximumFractionDigits: 0 })}{' '}
 							{t('projects.raised').toLowerCase()}
 						</span>
-						<span>{progressPercentage}%</span>
+						<span>{isLoadingProgress ? '…' : `${barProgressPercent}%`}</span>
 					</div>
+
+					<ReleasedProgressBar
+						releasedAmount={displayReleased}
+						progressPercentage={releasedProgressPercent}
+						className="mt-2"
+					/>
 
 					<div className="grid grid-cols-3 gap-2 mb-3 tabular-nums">
 						<div className="text-center">
@@ -144,25 +162,7 @@ export function ProjectCardGrid({ project, index = 0 }: ProjectCardGridProps) {
 						</div>
 					</div>
 
-					<div className="flex flex-wrap gap-1" aria-label="Project tags">
-						{project.tags.map((tag) => {
-							const bg = tag.color || '#ccc' // fallback
-							const textColor = getContrastTextColor(bg)
-
-							return (
-								<Badge
-									key={tag.id}
-									className={cn(
-										'uppercase transition-transform duration-200 group-hover:-translate-y-0.5',
-										textColor,
-									)}
-									style={{ backgroundColor: bg }}
-								>
-									{tag.name}
-								</Badge>
-							)
-						})}
-					</div>
+					<ProjectTagList tags={project.tags} className="mt-auto pt-1" />
 				</div>
 			</motion.article>
 		</Link>

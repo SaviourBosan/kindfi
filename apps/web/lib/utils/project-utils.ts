@@ -1,5 +1,9 @@
 import type { TypedSupabaseClient } from '@packages/lib/types'
 import { v4 as uuidv4 } from 'uuid'
+import type {
+	ProjectPitchTranslationContent,
+	ProjectTranslationContent,
+} from '~/lib/services/content-translation/types'
 import { countries } from '../constants/projects/countries.constant'
 import type {
 	BasicProjectInfo,
@@ -154,6 +158,41 @@ export function getSocialTypeFromUrl(url: string): string | null {
 }
 
 /**
+ * Strips empty translation fields so PATCH requests do not fail validation
+ * when the form still has placeholder `{ title: '', description: '' }`.
+ */
+export function sanitizeProjectTranslationForApi(
+	translation?: ProjectTranslationContent,
+): ProjectTranslationContent | undefined {
+	if (!translation) return undefined
+
+	const title = translation.title?.trim()
+	const description = translation.description?.trim()
+	const result: ProjectTranslationContent = {}
+
+	if (title && title.length >= 3) result.title = title
+	if (description && description.length >= 10) result.description = description
+
+	return Object.keys(result).length > 0 ? result : undefined
+}
+
+export function sanitizePitchTranslationForApi(
+	translation?: ProjectPitchTranslationContent,
+): ProjectPitchTranslationContent | undefined {
+	if (!translation) return undefined
+
+	const title = translation.title?.trim()
+	const story = translation.story?.trim()
+	const plainStory = story?.replace(/<[^>]*>/g, '').trim() ?? ''
+	const result: ProjectPitchTranslationContent = {}
+
+	if (title && title.length >= 1) result.title = title
+	if (plainStory.length >= 50 && story) result.story = story
+
+	return Object.keys(result).length > 0 ? result : undefined
+}
+
+/**
  * Normalizes a backend project object into a format that matches
  * the CreateProjectFormData interface used in frontend forms.
  *
@@ -177,6 +216,11 @@ export function normalizeProjectToFormDefaults(project: BasicProjectInfo): Creat
 		location: project.location ?? '',
 		category: project.category?.id ?? '',
 		tags: project.tags ?? [],
+		sourceLocale: project.sourceLocale ?? 'en',
+		translation: {
+			title: project.translation?.title ?? '',
+			description: project.translation?.description ?? '',
+		},
 	}
 }
 
@@ -204,13 +248,21 @@ export function parseFormData(formData: FormData) {
 		description: formData.get('description') as string,
 		targetAmount: Number(formData.get('targetAmount')),
 		minimumInvestment: Number(formData.get('minimumInvestment')),
-		website: formData.get('website') as string,
+		website: (formData.get('website') as string | null) ?? '',
 		location: formData.get('location') as string,
 		category: formData.get('category') as string,
 		tags: safeJsonParse(formData.get('tags') as string, [] as { name: string; color: string }[]),
 		socialLinks: safeJsonParse(formData.get('socialLinks') as string, [] as string[]),
 		image: formData.get('image') as File | null,
 		foundationId: (formData.get('foundationId') as string) || undefined,
+		developmentOnly: formData.get('developmentOnly') === 'true',
+		sourceLocale: (formData.get('sourceLocale') as string) || 'en',
+		translation: sanitizeProjectTranslationForApi(
+			safeJsonParse(
+				formData.get('translation') as string,
+				undefined as ProjectTranslationContent | undefined,
+			),
+		),
 	}
 }
 
@@ -364,43 +416,30 @@ export async function uploadPitchDeck(
 	})
 }
 
-/**
- * Converts a YouTube or Vimeo URL into an embeddable format.
- * Supports typical watch/share links and transforms them to iframe-compatible embed URLs.
- *
- * Examples:
- * - https://www.youtube.com/watch?v=abc123 → https://www.youtube.com/embed/abc123
- * - https://vimeo.com/123456 → https://player.vimeo.com/video/123456
- *
- * @param url - The original video URL provided by the user
- * @returns The embed-compatible URL if matched, or the original URL if no transformation applies
- */
-export function transformToEmbedUrl(url: string): string {
-	try {
-		const parsedUrl = new URL(url)
-		const hostname = parsedUrl.hostname
-		const pathname = parsedUrl.pathname
-
-		if (hostname.includes('youtube.com')) {
-			const videoId = parsedUrl.searchParams.get('v')
-			if (videoId) return `https://www.youtube.com/embed/${videoId}`
-		}
-
-		if (hostname === 'youtu.be') {
-			const videoId = pathname.split('/')[1]
-			if (videoId) return `https://www.youtube.com/embed/${videoId}`
-		}
-
-		if (hostname.includes('vimeo.com')) {
-			const videoId = pathname.split('/')[1]
-			if (videoId) return `https://player.vimeo.com/video/${videoId}`
-		}
-
-		return url // fallback (leave unchanged)
-	} catch {
-		return url // invalid URL, return as is
-	}
+export async function uploadStoryImage(
+	slug: string,
+	file: File,
+	supabase: TypedSupabaseClient,
+): Promise<string | null> {
+	const adapter = makeSupabaseAdapter(supabase, 'project_story_images')
+	return uploadFile({
+		client: adapter,
+		folder: slug,
+		file,
+		generateFilename: (slug, file) => {
+			const ext = file.name.split('.').pop() || 'jpg'
+			return `${slug}/${uuidv4()}.${ext}`
+		},
+		deleteExisting: false,
+		cacheControl: '31536000', // 1 year — story images are immutable
+	})
 }
+
+export {
+	getVideoProvider,
+	isSupportedVideoUrl,
+	transformToEmbedUrl,
+} from '~/lib/utils/video-embed'
 
 /**
  * Convenience helper to delete all files from a bucket/folder with Supabase.

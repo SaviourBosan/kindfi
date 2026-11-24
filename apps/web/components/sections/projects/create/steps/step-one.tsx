@@ -16,8 +16,10 @@ import {
 } from '~/components/base/form'
 import { Input } from '~/components/base/input'
 import { Textarea } from '~/components/base/textarea'
+import { ContentLanguageSelector } from '~/components/shared/content-language-selector'
 import { useCreateProject } from '~/hooks/contexts/use-create-project.context'
 import { zodResolver } from '~/lib/form/zod-resolver'
+import { useI18n } from '~/lib/i18n/context'
 import { stepOneSchema } from '~/lib/schemas/create-project.schemas'
 import type { StepOneData } from '~/lib/types/project/create-project.types'
 
@@ -27,12 +29,13 @@ interface StepOneProps {
 
 export function StepOne({ onNext }: StepOneProps) {
 	const { formData, updateFormData } = useCreateProject()
+	const { language } = useI18n()
 
 	const form = useForm<StepOneData>({
 		resolver: zodResolver(stepOneSchema),
 		defaultValues: {
-			title: formData.title,
-			description: formData.description,
+			title: formData.title ?? '',
+			description: formData.description ?? '',
 			targetAmount: formData.targetAmount || undefined,
 			minimumInvestment: formData.minimumInvestment || undefined,
 		},
@@ -55,6 +58,10 @@ export function StepOne({ onNext }: StepOneProps) {
 					<Form {...form}>
 						<form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
 							<CSRFTokenField />
+							<ContentLanguageSelector
+								value={formData.sourceLocale ?? language}
+								onChange={(locale) => updateFormData({ sourceLocale: locale })}
+							/>
 							<FormField
 								control={form.control}
 								name="title"
@@ -64,7 +71,14 @@ export function StepOne({ onNext }: StepOneProps) {
 											What is your project&apos;s title? <span className="text-destructive">*</span>
 										</FormLabel>
 										<FormControl>
-											<Input placeholder="Enter your project title" {...field} />
+											<Input
+												placeholder="Enter your project title"
+												value={field.value ?? ''}
+												onChange={field.onChange}
+												onBlur={field.onBlur}
+												name={field.name}
+												ref={field.ref}
+											/>
 										</FormControl>
 										<FormMessage />
 									</FormItem>
@@ -84,7 +98,11 @@ export function StepOne({ onNext }: StepOneProps) {
 											<Textarea
 												placeholder="Describe your project in a few sentences"
 												className="min-h-[100px]"
-												{...field}
+												value={field.value ?? ''}
+												onChange={field.onChange}
+												onBlur={field.onBlur}
+												name={field.name}
+												ref={field.ref}
 											/>
 										</FormControl>
 										<p className="text-sm text-muted-foreground mt-2">

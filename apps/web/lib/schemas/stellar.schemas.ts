@@ -1,3 +1,7 @@
+import {
+	isSmartAccountPlaceholder,
+	isValidStellarWalletAddress,
+} from '@packages/lib/utils/wallet-address'
 import { z } from 'zod'
 
 export const faucetSchema = z.object({
@@ -14,7 +18,15 @@ export const transferPrepareSchema = z.object({
 })
 
 export const accountInfoQuerySchema = z.object({
-	address: z.string().min(1, 'Address is required'),
+	address: z
+		.string()
+		.min(1, 'Address is required')
+		.refine((address) => !isSmartAccountPlaceholder(address), {
+			message: 'Smart account has not been deployed yet',
+		})
+		.refine((address) => isValidStellarWalletAddress(address), {
+			message: 'Must be a valid Stellar G-address or C-address',
+		}),
 })
 
 export const devicesSchema = z.object({

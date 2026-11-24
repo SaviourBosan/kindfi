@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { EtherfuseOnboardingStatus } from '~/lib/etherfuse/resolve-order-context'
+import {
+	safeLocalStorageGet,
+	safeLocalStorageRemove,
+	safeLocalStorageSet,
+} from '~/lib/utils/safe-storage'
 
 export type EtherfuseUserOnboarding = {
 	customerId: string
@@ -22,20 +27,20 @@ const readStoredOnboarding = (
 	}
 
 	try {
-		const raw = localStorage.getItem(storageKey(userId))
+		const raw = safeLocalStorageGet(storageKey(userId))
 		if (!raw) {
 			return null
 		}
 
 		const parsed = JSON.parse(raw) as EtherfuseUserOnboarding
 		if (parsed.walletPublicKey !== walletAddress) {
-			localStorage.removeItem(storageKey(userId))
+			safeLocalStorageRemove(storageKey(userId))
 			return null
 		}
 
 		return parsed
 	} catch {
-		localStorage.removeItem(storageKey(userId))
+		safeLocalStorageRemove(storageKey(userId))
 		return null
 	}
 }
@@ -52,20 +57,20 @@ export const useEtherfuseUserOnboarding = (userId: string, walletAddress: string
 
 	const persistOnboarding = useCallback(
 		(record: EtherfuseUserOnboarding) => {
-			localStorage.setItem(storageKey(userId), JSON.stringify(record))
+			safeLocalStorageSet(storageKey(userId), JSON.stringify(record))
 			setOnboarding(record)
 		},
 		[userId],
 	)
 
 	const clearOnboarding = useCallback(() => {
-		localStorage.removeItem(storageKey(userId))
+		safeLocalStorageRemove(storageKey(userId))
 		setOnboarding(null)
 		setStatus(null)
 	}, [userId])
 
 	const refreshStatus = useCallback(async () => {
-		if (!onboarding?.customerId || !onboarding.bankAccountId || !walletAddress) {
+		if (!walletAddress) {
 			setStatus(null)
 			return null
 		}
@@ -73,11 +78,7 @@ export const useEtherfuseUserOnboarding = (userId: string, walletAddress: string
 		setIsCheckingStatus(true)
 
 		try {
-			const params = new URLSearchParams({
-				customerId: onboarding.customerId,
-				bankAccountId: onboarding.bankAccountId,
-				walletAddress,
-			})
+			const params = new URLSearchParams({ walletAddress })
 			const response = await fetch(`/api/etherfuse/onboarding-status?${params.toString()}`)
 			const data = await response.json()
 
@@ -92,7 +93,7 @@ export const useEtherfuseUserOnboarding = (userId: string, walletAddress: string
 		} finally {
 			setIsCheckingStatus(false)
 		}
-	}, [onboarding?.bankAccountId, onboarding?.customerId, walletAddress])
+	}, [walletAddress])
 
 	useEffect(() => {
 		void refreshStatus()
@@ -115,7 +116,7 @@ export const useEtherfuseUserOnboarding = (userId: string, walletAddress: string
 
 	const startOnboarding = useCallback(async () => {
 		if (!walletAddress) {
-			throw new Error('Connect an external wallet before starting Etherfuse onboarding.')
+			throw new Error('A Stellar wallet is required before starting Etherfuse onboarding.')
 		}
 
 		setIsStarting(true)

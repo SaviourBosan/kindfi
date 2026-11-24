@@ -5,14 +5,21 @@ import { DollarSign, Info, Loader2, Send } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
+import { Alert, AlertDescription } from '~/components/base/alert'
 import { Button } from '~/components/base/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/base/card'
 import { Input } from '~/components/base/input'
 import { Label } from '~/components/base/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/base/tabs'
+import { ConfirmActionDialog } from '~/components/sections/admin/shared/confirm-action-dialog'
+import { useStellarNetworkConfig } from '~/hooks/contexts/stellar-network.context'
 import { useEscrow } from '~/hooks/contexts/use-escrow.context'
 import { useTrustlessSigner } from '~/hooks/escrow/use-trustless-signer'
+import { formatEscrowAmount } from '~/lib/utils/escrow/milestone-utils'
+import { submitTrustlessEscrowXdr } from '~/lib/utils/escrow/trustless-submit'
 import { EtherfuseOnRampCard } from '../components/etherfuse-on-ramp-card'
+
+const QUICK_AMOUNTS = [100, 500, 1000, 5000]
 
 interface FundEscrowTabProps {
 	escrowContractAddress: string
@@ -30,33 +37,34 @@ export function FundEscrowTab({
 	onSuccess,
 }: FundEscrowTabProps) {
 	const { fundEscrow, sendTransaction } = useEscrow()
-	const { ensureTrustlessSigner, signTrustlessTransaction } = useTrustlessSigner()
+	const { ensureTrustlessSigner, signAndSubmitTrustlessTransaction, address } = useTrustlessSigner()
+	const { networkId } = useStellarNetworkConfig()
 	const [fundAmount, setFundAmount] = useState<number | ''>('')
 	const [isProcessing, setIsProcessing] = useState(false)
+	const [confirmFundOpen, setConfirmFundOpen] = useState(false)
 
-	const handleFundEscrow = async () => {
+	const requestFundEscrow = () => {
 		if (!fundAmount || Number(fundAmount) <= 0) {
-			toast.error('Please enter a valid amount')
+			toast.error('Enter a valid amount greater than zero')
 			return
 		}
-
-		const amount = Number(fundAmount)
-
-		// Validate amount is reasonable (prevent accidental large amounts)
-		if (amount > 1_000_000) {
+		if (Number(fundAmount) > 1_000_000) {
 			toast.error('Amount too large', {
-				description: 'Please enter an amount less than $1,000,000',
+				description: 'Enter an amount less than $1,000,000',
 			})
 			return
 		}
+		setConfirmFundOpen(true)
+	}
+
+	const handleFundEscrow = async () => {
+		setConfirmFundOpen(false)
+		const amount = Number(fundAmount)
 
 		try {
 			setIsProcessing(true)
 			const signer = await ensureTrustlessSigner()
 
-			// 1) Get unsigned transaction
-			// Trustless Work expects amount in dollars (not stroops) - it handles conversion internally
-			// Note: The escrow contract and signer must have the USDC trustline established first
 			const fundResponse = await fundEscrow(
 				{
 					amount,
@@ -70,17 +78,14 @@ export function FundEscrowTab({
 				throw new Error('Failed to prepare funding transaction')
 			}
 
-			// 2) Sign transaction
-			const signedXdr = await signTrustlessTransaction(fundResponse.unsignedTransaction)
+			await submitTrustlessEscrowXdr(
+				fundResponse.unsignedTransaction,
+				signAndSubmitTrustlessTransaction,
+				sendTransaction,
+			)
 
-			// 3) Send transaction
-			const sendResult = await sendTransaction(signedXdr)
-			if (sendResult?.status !== 'SUCCESS') {
-				throw new Error('Transaction failed')
-			}
-
-			toast.success('Escrow funded successfully!', {
-				description: `You've added $${Number(fundAmount).toLocaleString()} to the escrow.`,
+			toast.success('Escrow funded successfully', {
+				description: `Added $${amount.toLocaleString()} to the escrow.`,
 			})
 
 			setFundAmount('')
@@ -88,14 +93,12 @@ export function FundEscrowTab({
 		} catch (error) {
 			logger.error('Fund escrow error:', error)
 
-			// Extract error message from various error formats
 			let errorMessage = ''
 			let apiErrorMessage = ''
 
 			if (error instanceof Error) {
 				errorMessage = error.message
 			} else if (typeof error === 'object' && error !== null) {
-				// Check for axios error response
 				if ('response' in error && error.response) {
 					const response = error.response as {
 						data?: { message?: string; error?: string }
@@ -111,30 +114,26 @@ export function FundEscrowTab({
 				errorMessage = String(error)
 			}
 
-			// Combine error messages for checking
 			const combinedMessage = `${errorMessage} ${apiErrorMessage}`.toLowerCase()
 
 			let userFriendlyMessage = 'Failed to fund escrow'
 
-			// Check for missing trustline/balance errors
 			if (
 				combinedMessage.includes('storage, missingvalue') ||
 				combinedMessage.includes('missingvalue') ||
 				(combinedMessage.includes('balance') && combinedMessage.includes('non-existing'))
 			) {
 				userFriendlyMessage =
-					'Your wallet needs to establish a trustline for the token before funding. Please ensure your wallet has approved the token contract.'
+					'Your wallet needs a trustline for this token before funding. Approve the token in your wallet first.'
 			} else if (
 				combinedMessage.includes('insufficient funds') ||
 				combinedMessage.includes('sufficient funds')
 			) {
-				userFriendlyMessage =
-					'Insufficient funds. Please ensure your wallet has enough token balance.'
+				userFriendlyMessage = 'Insufficient token balance in your connected wallet.'
 			} else if (combinedMessage.includes('trustline')) {
 				userFriendlyMessage =
-					'Trustline required. Your wallet needs to establish a trustline for the token before funding.'
+					'Trustline required. Establish a trustline for this token in your wallet.'
 			} else if (apiErrorMessage) {
-				// Use API error message if available
 				userFriendlyMessage = apiErrorMessage
 			}
 
@@ -148,13 +147,13 @@ export function FundEscrowTab({
 		<Card>
 			<CardHeader>
 				<div className="flex items-center gap-3">
-					<div className="p-2 rounded-lg bg-primary/10">
-						<DollarSign className="w-5 h-5 text-primary" />
+					<div className="rounded-lg bg-primary/10 p-2">
+						<DollarSign className="h-5 w-5 text-primary" aria-hidden="true" />
 					</div>
 					<div>
 						<CardTitle>Fund Escrow</CardTitle>
 						<CardDescription>
-							Add funds to your escrow contract using crypto or fiat on-ramp.
+							Deposit USDC from your connected wallet or use fiat on-ramp.
 						</CardDescription>
 					</div>
 				</div>
@@ -162,65 +161,80 @@ export function FundEscrowTab({
 			<CardContent>
 				<Tabs defaultValue="crypto" className="w-full">
 					<TabsList className="grid w-full grid-cols-2">
-						<TabsTrigger value="crypto">Crypto Funding</TabsTrigger>
+						<TabsTrigger value="crypto">Crypto</TabsTrigger>
 						<TabsTrigger value="fiat">Fiat On-Ramp</TabsTrigger>
 					</TabsList>
-					<TabsContent value="crypto" className="space-y-6 mt-6">
-						<div className="space-y-2">
-							<Label htmlFor="fund-amount" className="text-base font-medium">
-								Amount (USDC)
-							</Label>
-							<Input
-								id="fund-amount"
-								type="number"
-								value={fundAmount}
-								onChange={(e) => setFundAmount(e.target.value === '' ? '' : Number(e.target.value))}
-								placeholder="0.00"
-								min="0"
-								step="0.01"
-								className="text-lg"
-								disabled={isProcessing}
-							/>
-							<p className="text-xs text-muted-foreground">
-								Enter the amount you want to add to the escrow
+					<TabsContent value="crypto" className="mt-6 space-y-6">
+						<div className="rounded-lg border bg-muted/40 p-4">
+							<p className="text-sm font-medium">Current Balance</p>
+							<p className="mt-1 text-2xl font-bold tabular-nums">
+								{isLoadingBalance ? (
+									<span className="text-base text-muted-foreground">Loading…</span>
+								) : balance !== null ? (
+									formatEscrowAmount(balance)
+								) : (
+									'N/A'
+								)}
 							</p>
 						</div>
 
-						<div className="rounded-lg border p-4 bg-muted/50">
-							<div className="flex items-start gap-3">
-								<Info className="w-5 h-5 text-primary mt-0.5" />
-								<div className="space-y-1">
-									<p className="text-sm font-medium">Current Balance</p>
-									<p className="text-2xl font-bold">
-										{isLoadingBalance ? (
-											<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-										) : balance !== null ? (
-											`$${balance.toLocaleString(undefined, {
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 7,
-											})}`
-										) : (
-											'N/A'
-										)}
-									</p>
-								</div>
+						<div className="space-y-3">
+							<Label htmlFor="fund-amount" className="text-base font-medium">
+								Amount to Add (USDC)
+							</Label>
+							<Input
+								id="fund-amount"
+								name="fund-amount"
+								type="number"
+								inputMode="decimal"
+								autoComplete="off"
+								value={fundAmount}
+								onChange={(e) => setFundAmount(e.target.value === '' ? '' : Number(e.target.value))}
+								placeholder="0.00…"
+								min="0"
+								step="0.01"
+								className="text-lg tabular-nums"
+								disabled={isProcessing}
+							/>
+							<div className="flex flex-wrap gap-2">
+								{QUICK_AMOUNTS.map((amount) => (
+									<Button
+										key={amount}
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={() => setFundAmount(amount)}
+										disabled={isProcessing}
+									>
+										${amount.toLocaleString()}
+									</Button>
+								))}
 							</div>
 						</div>
 
+						<Alert>
+							<Info className="h-4 w-4" aria-hidden="true" />
+							<AlertDescription>
+								Your wallet must hold enough USDC and have the token trustline enabled. You will
+								sign the funding transaction with your connected external wallet.
+							</AlertDescription>
+						</Alert>
+
 						<Button
-							onClick={handleFundEscrow}
+							type="button"
+							onClick={requestFundEscrow}
 							disabled={!fundAmount || Number(fundAmount) <= 0 || isProcessing}
 							className="w-full"
 							size="lg"
 						>
 							{isProcessing ? (
 								<>
-									<Loader2 className="w-4 h-4 mr-2 animate-spin" />
-									Processing...
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+									Funding…
 								</>
 							) : (
 								<>
-									<Send className="w-4 h-4 mr-2" />
+									<Send className="mr-2 h-4 w-4" aria-hidden="true" />
 									Fund Escrow
 								</>
 							)}
@@ -234,6 +248,23 @@ export function FundEscrowTab({
 						/>
 					</TabsContent>
 				</Tabs>
+
+				<ConfirmActionDialog
+					open={confirmFundOpen}
+					onOpenChange={setConfirmFundOpen}
+					title="Fund escrow"
+					description="Your connected wallet will be asked to sign a funding transaction for this escrow contract."
+					summary={[
+						{ label: 'Amount', value: `$${Number(fundAmount || 0).toLocaleString('en-US')} USDC` },
+						{ label: 'Escrow contract', value: `${escrowContractAddress.slice(0, 10)}…` },
+						{ label: 'Escrow type', value: escrowType },
+					]}
+					blockchain={{ networkId, signerAddress: address }}
+					confirmLabel="Sign & fund"
+					pendingLabel="Funding…"
+					isPending={isProcessing}
+					onConfirm={() => void handleFundEscrow()}
+				/>
 			</CardContent>
 		</Card>
 	)

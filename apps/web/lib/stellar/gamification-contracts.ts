@@ -1,113 +1,51 @@
 /**
  * Gamification Contract Service
  *
- * Service for invoking gamification smart contracts (Streak, Referral, Quest, Reputation)
- * Uses a service account with "recorder" role to record events on-chain.
+ * Compatibility facade over the split gamification modules:
  *
- * The recorder account secret key should be stored in SOROBAN_PRIVATE_KEY environment variable.
+ * - Reads (simulation only, never submits): `GamificationContractReads`
+ *   in `gamification-reads.ts`. Reads return a typed
+ *   {@link ContractReadResult}: `found`, `not_found`, or `error`. A missing
+ *   contract value is `not_found` — never a substituted `0`.
+ * - Writes (transaction submission): `GamificationContractWrites` in
+ *   `gamification-writes.ts`. Every write goes through one shared submit
+ *   helper in that module.
+ *
+ * New code should use `service.reads` / `service.writes` (or import the
+ * modules directly) instead of the delegating methods below. The methods are
+ * kept so existing callers — API routes, services, and scripts — keep
+ * working unchanged.
+ *
+ * Chain-data rules (RPC for recent state, indexer for payment history) are
+ * stated in `chain-data.md` next to this file.
  */
 
-import {
-	Account,
-	Address,
-	Keypair,
-	nativeToScVal,
-	Operation,
-	TransactionBuilder,
-	xdr,
-} from '@stellar/stellar-sdk'
+import { Keypair } from '@stellar/stellar-sdk'
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc'
-import { Api, assembleTransaction } from '@stellar/stellar-sdk/rpc'
 import { logger } from '@/lib/logger'
+import { GamificationContractReads, type GamificationRpcClient } from './gamification-reads'
+import {
+	GamificationContractWrites,
+	type GamificationTxResult,
+	type NftMetadataInput,
+} from './gamification-writes'
 
-interface RecordStreakDonationParams {
-	userAddress: string // User's Stellar address (G... or C...)
-	period: 'weekly' | 'monthly' // Streak period
-	donationTimestamp: number // Unix timestamp
-}
-
-interface CreateReferralParams {
-	referrerAddress: string // Referrer's Stellar address
-	referredAddress: string // Referred user's Stellar address
-}
-
-interface MarkOnboardedParams {
-	referredAddress: string // Referred user's Stellar address
-}
-
-interface RecordReferralDonationParams {
-	referredAddress: string // Referred user's Stellar address
-}
-
-interface UpdateQuestProgressParams {
-	userAddress: string
-	questId: number
-	progressValue: number
-}
-
-interface CreateQuestParams {
-	questType: number // QuestType enum value (0-5)
-	name: string
-	description: string
-	targetValue: number
-	rewardPoints: number
-	expiresAt: number // Unix timestamp, 0 for no expiration
-}
-
-interface MintNFTParams {
-	toAddress: string // Recipient's Stellar address
-	metadata: {
-		name: string
-		description: string
-		imageUri: string
-		externalUrl: string
-		attributes: Array<{
-			trait_type: string
-			value: string
-			display_type?: string
-			max_value?: string
-		}>
-	}
-}
-
-interface UpdateNFTMetadataParams {
-	tokenId: number
-	metadata: {
-		name: string
-		description: string
-		imageUri: string
-		externalUrl: string
-		attributes: Array<{
-			trait_type: string
-			value: string
-			display_type?: string
-			max_value?: string
-		}>
-	}
-}
-
-/**
- * Global transaction queue to prevent txBadSeq errors.
- *
- * When multiple on-chain calls happen concurrently (e.g. streak + quest + NFT
- * during a single donation), they all share the same recorder account. Without
- * serialization, two transactions can be built with the same sequence number,
- * causing the second one to fail with txBadSeq (-5).
- *
- * This queue ensures only one transaction is in-flight at a time.
- */
-let txQueue: Promise<unknown> = Promise.resolve()
-
-function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-	const result = txQueue.then(fn, fn) // run even if previous rejected
-	txQueue = result.catch(() => {}) // swallow so the queue keeps moving
-	return result
-}
+export type {
+	ContractReadResult,
+	GamificationRpcClient,
+	MaxQuestIdResult,
+	QuestDefinition,
+	ReferrerStatistics,
+} from './gamification-reads'
+export { GamificationContractReads } from './gamification-reads'
+export type { GamificationTxResult, NftMetadataInput } from './gamification-writes'
+export { GamificationContractWrites } from './gamification-writes'
 
 export class GamificationContractService {
-	private server: SorobanRpc.Server
-	private networkPassphrase: string
-	private recorderKeypair: Keypair
+	/** Read-only contract views (simulation, no submissions). */
+	readonly reads: GamificationContractReads
+	/** Contract transaction submissions. */
+	readonly writes: GamificationContractWrites
 
 	constructor(rpcUrl?: string, networkPassphrase?: string, recorderSecretKey?: string) {
 		const rpc = rpcUrl || process.env.STELLAR_RPC_URL || process.env.RPC_URL
@@ -128,104 +66,99 @@ export class GamificationContractService {
 			throw new Error('Stellar RPC URL is required')
 		}
 
-		this.server = new SorobanRpc.Server(rpc, { allowHttp: true })
-		this.networkPassphrase = passphrase
-		this.recorderKeypair = Keypair.fromSecret(secretKey)
+		const client: GamificationRpcClient = {
+			server: new SorobanRpc.Server(rpc, { allowHttp: true }),
+			networkPassphrase: passphrase,
+			recorderKeypair: Keypair.fromSecret(secretKey),
+		}
+
+		this.reads = new GamificationContractReads(client)
+		this.writes = new GamificationContractWrites(client)
 	}
+
+	// ------------------------------------------------------------------
+	// Reads (legacy shapes — new code should use `service.reads` instead)
+	// ------------------------------------------------------------------
+
+	/**
+	 * Read-only check: returns true when get_quest returns a definition for questId.
+	 */
+	async questExistsOnChain(questContractAddress: string, questId: number): Promise<boolean> {
+		return this.reads.questExistsOnChain(questContractAddress, questId)
+	}
+
+	/**
+	 * Highest on-chain quest_id that currently exists (0 when the contract has no quests).
+	 *
+	 * Legacy numeric shape: an RPC failure yields the last confirmed quest id
+	 * (0 when nothing was confirmed), never a reset to 0 after known quests.
+	 * New code should use `service.reads.getMaxQuestId`, which returns a
+	 * typed result instead.
+	 */
+	async getMaxQuestIdOnChain(questContractAddress: string): Promise<number> {
+		const result = await this.reads.getMaxQuestId(questContractAddress)
+		if (result.status === 'error') {
+			logger.warn(
+				'[GamificationContractService] getMaxQuestIdOnChain treating RPC error as last confirmed id:',
+				result.error,
+			)
+			return result.lastConfirmedId
+		}
+		return result.value
+	}
+
+	/**
+	 * Read referrer statistics from the Referral contract (simulation-only read).
+	 * Returns success when the contract is reachable; stats may be null for new referrers.
+	 */
+	async getReferrerStatistics(
+		referralContractAddress: string,
+		referrerAddress: string,
+	): Promise<{ success: boolean; hasStats: boolean; error?: string }> {
+		const result = await this.reads.getReferrerStatistics(referralContractAddress, referrerAddress)
+		if (result.status === 'found') {
+			return { success: true, hasStats: true }
+		}
+		if (result.status === 'not_found') {
+			return { success: true, hasStats: false }
+		}
+		return { success: false, hasStats: false, error: result.error }
+	}
+
+	/**
+	 * Check if an account has a specific role on a contract.
+	 */
+	async hasRole(
+		contractAddress: string,
+		accountAddress: string,
+		role: string,
+	): Promise<{ hasRole: boolean; error?: string }> {
+		const result = await this.reads.hasRole(contractAddress, accountAddress, role)
+		if (result.status === 'found') {
+			return { hasRole: result.value }
+		}
+		if (result.status === 'error') {
+			return { hasRole: false, error: result.error }
+		}
+		return { hasRole: false }
+	}
+
+	// ------------------------------------------------------------------
+	// Writes (delegated to GamificationContractWrites)
+	// ------------------------------------------------------------------
 
 	/**
 	 * Record a donation in the Streak contract
 	 */
 	async recordStreakDonation(
 		streakContractAddress: string,
-		params: RecordStreakDonationParams,
-	): Promise<{ success: boolean; streak?: number; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { userAddress, period, donationTimestamp } = params
-
-				// Convert period to enum (0 = Weekly, 1 = Monthly)
-				const periodValue = period === 'weekly' ? 0 : 1
-
-				// Get recorder account
-				const recorderAccount = await this.server
-					.getAccount(this.recorderKeypair.publicKey())
-					.then((res) => {
-						const account = new Account(res.accountId(), res.sequenceNumber())
-						return account
-					})
-
-				// Build contract invocation using Operation.invokeContractFunction()
-				// Signature: record_donation(caller: Address, user: Address, period: StreakPeriod, donation_timestamp: u64)
-				// Note: The caller parameter must match the transaction source account (recorderAccount)
-				const recorderAddressStr = this.recorderKeypair.publicKey()
-				const recorderAddress = Address.fromString(recorderAddressStr)
-				const userAddr = Address.fromString(userAddress)
-
-				const args = [
-					nativeToScVal(recorderAddress, { type: 'address' }), // caller (must match transaction source)
-					nativeToScVal(userAddr, { type: 'address' }), // user
-					nativeToScVal(periodValue, { type: 'u32' }), // period: StreakPeriod enum (0 = Weekly, 1 = Monthly)
-					nativeToScVal(BigInt(donationTimestamp), { type: 'u64' }), // donation_timestamp
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: streakContractAddress,
-					function: 'record_donation',
-					args,
-				})
-
-				// Build transaction
-				const transaction = new TransactionBuilder(recorderAccount, {
-					fee: '100',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				// Simulate transaction first
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error('[GamificationContractService] Simulation failed:', simulation)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				// Assemble transaction with simulation results
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-
-				assembledTx.sign(this.recorderKeypair)
-
-				// Submit transaction
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					logger.error('[GamificationContractService] Transaction failed:', result)
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				// Wait for transaction to be included in ledger
-				// Note: The contract returns the new streak count, but we'd need to parse it from the transaction result
-				// For now, we'll return success if the transaction was submitted
-				return {
-					success: true,
-					streak: 1,
-				}
-			} catch (error) {
-				logger.error('[GamificationContractService] Error recording streak donation:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – recordStreakDonation
+		params: {
+			userAddress: string
+			period: 'weekly' | 'monthly'
+			donationTimestamp: number
+		},
+	): Promise<GamificationTxResult<{ streak?: number }>> {
+		return this.writes.recordStreakDonation(streakContractAddress, params)
 	}
 
 	/**
@@ -233,100 +166,9 @@ export class GamificationContractService {
 	 */
 	async recordReferralDonation(
 		referralContractAddress: string,
-		params: RecordReferralDonationParams,
-	): Promise<{ success: boolean; rewardPoints?: number; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { referredAddress } = params
-
-				// Get recorder account
-				const recorderAccount = await this.server
-					.getAccount(this.recorderKeypair.publicKey())
-					.then((res) => {
-						const account = new Account(res.accountId(), res.sequenceNumber())
-						return account
-					})
-
-				// Build contract invocation using Operation.invokeContractFunction()
-				// Signature: record_donation(caller: Address, referred: Address)
-				// Note: The caller parameter must match the transaction source account (recorderAccount)
-				const recorderAddressStr = this.recorderKeypair.publicKey()
-				const recorderAddress = Address.fromString(recorderAddressStr)
-				const referredAddr = Address.fromString(referredAddress)
-
-				const args = [
-					nativeToScVal(recorderAddress, { type: 'address' }), // caller (must match transaction source)
-					nativeToScVal(referredAddr, { type: 'address' }), // referred
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: referralContractAddress,
-					function: 'record_donation',
-					args,
-				})
-
-				// Build transaction
-				const transaction = new TransactionBuilder(recorderAccount, {
-					fee: '100',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				// Simulate transaction first
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error('[GamificationContractService] Simulation failed:', simulation)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				// Parse reward points from simulation result (record_donation returns u32)
-				let rewardPoints = 0
-				if (simulation.result?.retval) {
-					try {
-						const { scValToNative } = await import('@stellar/stellar-sdk')
-						rewardPoints = (scValToNative(simulation.result.retval) as number) ?? 0
-					} catch {
-						logger.warn(
-							'[GamificationContractService] Could not parse reward points from record_donation',
-						)
-					}
-				}
-
-				// Assemble transaction with simulation results
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-
-				assembledTx.sign(this.recorderKeypair)
-
-				// Submit transaction
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					logger.error('[GamificationContractService] Transaction failed:', result)
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				// Transaction submitted successfully
-				return {
-					success: true,
-					rewardPoints,
-				}
-			} catch (error) {
-				logger.error('[GamificationContractService] Error recording referral donation:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – recordReferralDonation
+		params: { referredAddress: string },
+	): Promise<GamificationTxResult<{ rewardPoints?: number }>> {
+		return this.writes.recordReferralDonation(referralContractAddress, params)
 	}
 
 	/**
@@ -335,76 +177,9 @@ export class GamificationContractService {
 	 */
 	async createReferral(
 		referralContractAddress: string,
-		params: CreateReferralParams,
-	): Promise<{ success: boolean; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { referrerAddress, referredAddress } = params
-
-				const recorderAccount = await this.server
-					.getAccount(this.recorderKeypair.publicKey())
-					.then((res) => new Account(res.accountId(), res.sequenceNumber()))
-
-				const args = [
-					nativeToScVal(Address.fromString(this.recorderKeypair.publicKey()), {
-						type: 'address',
-					}),
-					nativeToScVal(Address.fromString(referrerAddress), {
-						type: 'address',
-					}),
-					nativeToScVal(Address.fromString(referredAddress), {
-						type: 'address',
-					}),
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: referralContractAddress,
-					function: 'create_referral',
-					args,
-				})
-
-				const transaction = new TransactionBuilder(recorderAccount, {
-					fee: '100',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error(
-						'[GamificationContractService] createReferral simulation failed:',
-						simulation,
-					)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-				assembledTx.sign(this.recorderKeypair)
-
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				return { success: true }
-			} catch (error) {
-				logger.error('[GamificationContractService] Error creating referral:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – createReferral
+		params: { referrerAddress: string; referredAddress: string },
+	): Promise<GamificationTxResult> {
+		return this.writes.createReferral(referralContractAddress, params)
 	}
 
 	/**
@@ -413,83 +188,9 @@ export class GamificationContractService {
 	 */
 	async markOnboarded(
 		referralContractAddress: string,
-		params: MarkOnboardedParams,
-	): Promise<{ success: boolean; rewardPoints?: number; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { referredAddress } = params
-
-				const recorderAccount = await this.server
-					.getAccount(this.recorderKeypair.publicKey())
-					.then((res) => new Account(res.accountId(), res.sequenceNumber()))
-
-				const args = [
-					nativeToScVal(Address.fromString(this.recorderKeypair.publicKey()), {
-						type: 'address',
-					}),
-					nativeToScVal(Address.fromString(referredAddress), {
-						type: 'address',
-					}),
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: referralContractAddress,
-					function: 'mark_onboarded',
-					args,
-				})
-
-				const transaction = new TransactionBuilder(recorderAccount, {
-					fee: '100',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error('[GamificationContractService] markOnboarded simulation failed:', simulation)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				// Parse reward points from simulation result
-				let rewardPoints = 0
-				if (simulation.result?.retval) {
-					try {
-						const { scValToNative } = await import('@stellar/stellar-sdk')
-						rewardPoints = (scValToNative(simulation.result.retval) as number) ?? 0
-					} catch {
-						logger.warn(
-							'[GamificationContractService] Could not parse reward points from markOnboarded',
-						)
-					}
-				}
-
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-				assembledTx.sign(this.recorderKeypair)
-
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				return { success: true, rewardPoints }
-			} catch (error) {
-				logger.error('[GamificationContractService] Error marking onboarded:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – markOnboarded
+		params: { referredAddress: string },
+	): Promise<GamificationTxResult<{ rewardPoints?: number }>> {
+		return this.writes.markOnboarded(referralContractAddress, params)
 	}
 
 	/**
@@ -497,89 +198,9 @@ export class GamificationContractService {
 	 */
 	async updateQuestProgress(
 		questContractAddress: string,
-		params: UpdateQuestProgressParams,
-	): Promise<{ success: boolean; completed?: boolean; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { userAddress, questId, progressValue } = params
-
-				// Get recorder account
-				const recorderAccount = await this.server
-					.getAccount(this.recorderKeypair.publicKey())
-					.then((res) => {
-						const account = new Account(res.accountId(), res.sequenceNumber())
-						return account
-					})
-
-				// Build contract invocation using Operation.invokeContractFunction()
-				// Signature: update_progress(caller: Address, user: Address, quest_id: u32, progress_value: u32)
-				// Note: The caller parameter must match the transaction source account (recorderAccount)
-				const recorderAddressStr = this.recorderKeypair.publicKey()
-				const recorderAddress = Address.fromString(recorderAddressStr)
-				const userAddr = Address.fromString(userAddress)
-
-				const args = [
-					nativeToScVal(recorderAddress, { type: 'address' }), // caller (must match transaction source)
-					nativeToScVal(userAddr, { type: 'address' }), // user
-					nativeToScVal(questId, { type: 'u32' }), // quest_id
-					nativeToScVal(progressValue, { type: 'u32' }), // progress_value
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: questContractAddress,
-					function: 'update_progress',
-					args,
-				})
-
-				// Build transaction
-				const transaction = new TransactionBuilder(recorderAccount, {
-					fee: '100',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				// Simulate transaction first
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error('[GamificationContractService] Simulation failed:', simulation)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				// Assemble transaction with simulation results
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-
-				assembledTx.sign(this.recorderKeypair)
-
-				// Submit transaction
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					logger.error('[GamificationContractService] Transaction failed:', result)
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				// Transaction submitted successfully
-				return {
-					success: true,
-					completed: false,
-				}
-			} catch (error) {
-				logger.error('[GamificationContractService] Error updating quest progress:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – updateQuestProgress
+		params: { userAddress: string; questId: number; progressValue: number },
+	): Promise<GamificationTxResult<{ completed?: boolean }>> {
+		return this.writes.updateQuestProgress(questContractAddress, params)
 	}
 
 	/**
@@ -588,191 +209,17 @@ export class GamificationContractService {
 	 */
 	async createQuest(
 		questContractAddress: string,
-		params: CreateQuestParams,
+		params: {
+			questType: number
+			name: string
+			description: string
+			targetValue: number
+			rewardPoints: number
+			expiresAt: number
+		},
 		adminKeypair: Keypair,
-	): Promise<{ success: boolean; questId?: number; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { questType, name, description, targetValue, rewardPoints, expiresAt } = params
-
-				// Get admin account
-				const adminAccount = await this.server
-					.getAccount(adminKeypair.publicKey())
-					.then((res) => {
-						const account = new Account(res.accountId(), res.sequenceNumber())
-						return account
-					})
-					.catch((error) => {
-						logger.error('[GamificationContractService] Error fetching admin account:', error)
-						throw error
-					})
-
-				const adminAddress = Address.fromString(adminKeypair.publicKey())
-
-				// Build contract invocation args
-				// create_quest(caller: Address, quest_type: QuestType, name: String, description: String, target_value: u32, reward_points: u32, expires_at: u64) -> u32
-				const args = [
-					nativeToScVal(adminAddress, { type: 'address' }), // caller (must match transaction source)
-					nativeToScVal(questType, { type: 'u32' }), // quest_type
-					nativeToScVal(name, { type: 'string' }), // name
-					nativeToScVal(description, { type: 'string' }), // description
-					nativeToScVal(targetValue, { type: 'u32' }), // target_value
-					nativeToScVal(rewardPoints, { type: 'u32' }), // reward_points
-					nativeToScVal(BigInt(expiresAt), { type: 'u64' }), // expires_at
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: questContractAddress,
-					function: 'create_quest',
-					args,
-				})
-
-				// Build transaction
-				const transaction = new TransactionBuilder(adminAccount, {
-					fee: '100',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				// Simulate transaction first
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error('[GamificationContractService] Simulation failed:', simulation)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				// Assemble transaction with simulation results
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-
-				assembledTx.sign(adminKeypair)
-
-				// Submit transaction
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					logger.error('[GamificationContractService] Transaction failed:', result)
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				// Parse quest ID from simulation result
-				// The create_quest function returns the quest_id (u32)
-				let questId: number | undefined
-				if (simulation.result?.retval) {
-					try {
-						// Convert ScVal to native value
-						const { scValToNative } = await import('@stellar/stellar-sdk')
-						questId = scValToNative(simulation.result.retval) as number
-					} catch (e) {
-						logger.warn(
-							'[GamificationContractService] Could not parse quest ID from simulation result',
-							e,
-						)
-					}
-				}
-
-				return {
-					success: true,
-					questId,
-				}
-			} catch (error) {
-				logger.error('[GamificationContractService] Error creating quest:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – createQuest
-	}
-
-	// ========================================================================
-	// NFT Contract Methods
-	// ========================================================================
-
-	/**
-	 * Build an individual NFTAttribute as an ScVal map.
-	 *
-	 * The Soroban contracttype `NFTAttribute` has fields:
-	 *   trait_type: String, value: String, display_type: Option<String>, max_value: Option<String>
-	 */
-	private buildNFTAttributeScVal(attr: {
-		trait_type: string
-		value: string
-		display_type?: string
-		max_value?: string
-	}) {
-		const fields = [
-			new xdr.ScMapEntry({
-				key: nativeToScVal('display_type', { type: 'symbol' }),
-				val:
-					attr.display_type != null
-						? xdr.ScVal.scvVec([nativeToScVal(attr.display_type, { type: 'string' })])
-						: xdr.ScVal.scvVoid(),
-			}),
-			new xdr.ScMapEntry({
-				key: nativeToScVal('max_value', { type: 'symbol' }),
-				val:
-					attr.max_value != null
-						? xdr.ScVal.scvVec([nativeToScVal(attr.max_value, { type: 'string' })])
-						: xdr.ScVal.scvVoid(),
-			}),
-			new xdr.ScMapEntry({
-				key: nativeToScVal('trait_type', { type: 'symbol' }),
-				val: nativeToScVal(attr.trait_type, { type: 'string' }),
-			}),
-			new xdr.ScMapEntry({
-				key: nativeToScVal('value', { type: 'symbol' }),
-				val: nativeToScVal(attr.value, { type: 'string' }),
-			}),
-		]
-
-		return xdr.ScVal.scvMap(fields)
-	}
-
-	/**
-	 * Build the full NFTMetadata ScVal for on-chain submission.
-	 *
-	 * The Soroban contracttype `NFTMetadata` has fields:
-	 *   name: String, description: String, image_uri: String, external_url: String,
-	 *   attributes: Vec<NFTAttribute>
-	 *
-	 * Fields must be in alphabetical order for contracttype map encoding.
-	 */
-	private buildMetadataArg(metadata: MintNFTParams['metadata']) {
-		const attrVec = metadata.attributes.map((a) => this.buildNFTAttributeScVal(a))
-
-		const fields = [
-			new xdr.ScMapEntry({
-				key: nativeToScVal('attributes', { type: 'symbol' }),
-				val: xdr.ScVal.scvVec(attrVec),
-			}),
-			new xdr.ScMapEntry({
-				key: nativeToScVal('description', { type: 'symbol' }),
-				val: nativeToScVal(metadata.description, { type: 'string' }),
-			}),
-			new xdr.ScMapEntry({
-				key: nativeToScVal('external_url', { type: 'symbol' }),
-				val: nativeToScVal(metadata.externalUrl, { type: 'string' }),
-			}),
-			new xdr.ScMapEntry({
-				key: nativeToScVal('image_uri', { type: 'symbol' }),
-				val: nativeToScVal(metadata.imageUri, { type: 'string' }),
-			}),
-			new xdr.ScMapEntry({
-				key: nativeToScVal('name', { type: 'symbol' }),
-				val: nativeToScVal(metadata.name, { type: 'string' }),
-			}),
-		]
-
-		return xdr.ScVal.scvMap(fields)
+	): Promise<GamificationTxResult<{ questId?: number }>> {
+		return this.writes.createQuest(questContractAddress, params, adminKeypair)
 	}
 
 	/**
@@ -783,82 +230,12 @@ export class GamificationContractService {
 	 */
 	async mintNFT(
 		nftContractAddress: string,
-		params: MintNFTParams,
-	): Promise<{ success: boolean; tokenId?: number; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { toAddress, metadata } = params
-
-				const recorderAccount = await this.server
-					.getAccount(this.recorderKeypair.publicKey())
-					.then((res) => new Account(res.accountId(), res.sequenceNumber()))
-
-				const metadataArg = this.buildMetadataArg(metadata)
-
-				const args = [
-					nativeToScVal(Address.fromString(this.recorderKeypair.publicKey()), {
-						type: 'address',
-					}),
-					nativeToScVal(Address.fromString(toAddress), { type: 'address' }),
-					metadataArg,
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: nftContractAddress,
-					function: 'mint_with_metadata',
-					args,
-				})
-
-				const transaction = new TransactionBuilder(recorderAccount, {
-					fee: '1000000',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error('[GamificationContractService] mintNFT simulation failed:', simulation)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				// Parse token ID from simulation result (returns u32)
-				let tokenId: number | undefined
-				if (simulation.result?.retval) {
-					try {
-						const { scValToNative } = await import('@stellar/stellar-sdk')
-						tokenId = scValToNative(simulation.result.retval) as number
-					} catch {
-						logger.warn('[GamificationContractService] Could not parse token ID from simulation')
-					}
-				}
-
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-				assembledTx.sign(this.recorderKeypair)
-
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				return { success: true, tokenId }
-			} catch (error) {
-				logger.error('[GamificationContractService] Error minting NFT:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – mintNFT
+		params: {
+			toAddress: string
+			metadata: NftMetadataInput
+		},
+	): Promise<GamificationTxResult<{ tokenId?: number }>> {
+		return this.writes.mintNFT(nftContractAddress, params)
 	}
 
 	/**
@@ -869,74 +246,12 @@ export class GamificationContractService {
 	 */
 	async updateNFTMetadata(
 		nftContractAddress: string,
-		params: UpdateNFTMetadataParams,
-	): Promise<{ success: boolean; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const { tokenId, metadata } = params
-
-				const recorderAccount = await this.server
-					.getAccount(this.recorderKeypair.publicKey())
-					.then((res) => new Account(res.accountId(), res.sequenceNumber()))
-
-				const metadataArg = this.buildMetadataArg(metadata)
-
-				const args = [
-					nativeToScVal(Address.fromString(this.recorderKeypair.publicKey()), {
-						type: 'address',
-					}),
-					nativeToScVal(tokenId, { type: 'u32' }),
-					metadataArg,
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: nftContractAddress,
-					function: 'update_metadata',
-					args,
-				})
-
-				const transaction = new TransactionBuilder(recorderAccount, {
-					fee: '1000000',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error(
-						'[GamificationContractService] updateNFTMetadata simulation failed:',
-						simulation,
-					)
-					return {
-						success: false,
-						error: `Simulation failed: ${JSON.stringify(simulation)}`,
-					}
-				}
-
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-				assembledTx.sign(this.recorderKeypair)
-
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result)}`,
-					}
-				}
-
-				return { success: true }
-			} catch (error) {
-				logger.error('[GamificationContractService] Error updating NFT metadata:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – updateNFTMetadata
+		params: {
+			tokenId: number
+			metadata: NftMetadataInput
+		},
+	): Promise<GamificationTxResult> {
+		return this.writes.updateNFTMetadata(nftContractAddress, params)
 	}
 
 	/**
@@ -948,144 +263,21 @@ export class GamificationContractService {
 		accountAddress: string,
 		role: string,
 		adminKeypair: Keypair,
-	): Promise<{ success: boolean; error?: string }> {
-		return enqueue(async () => {
-			try {
-				const adminAccount = await this.server
-					.getAccount(adminKeypair.publicKey())
-					.then((res) => new Account(res.accountId(), res.sequenceNumber()))
-
-				const args = [
-					nativeToScVal(Address.fromString(accountAddress), {
-						type: 'address',
-					}), // account
-					nativeToScVal(role, { type: 'symbol' }), // role
-					nativeToScVal(Address.fromString(adminKeypair.publicKey()), {
-						type: 'address',
-					}), // caller (admin)
-				]
-
-				const operation = Operation.invokeContractFunction({
-					contract: contractAddress,
-					function: 'grant_role',
-					args,
-				})
-
-				const transaction = new TransactionBuilder(adminAccount, {
-					fee: '1000000',
-					networkPassphrase: this.networkPassphrase,
-				})
-					.addOperation(operation)
-					.setTimeout(60)
-					.build()
-
-				const simulation = await this.server.simulateTransaction(transaction)
-
-				if (Api.isSimulationError(simulation)) {
-					logger.error(
-						'[GamificationContractService] grant_role simulation failed:',
-						simulation.error,
-					)
-					return {
-						success: false,
-						error: `Simulation failed: ${simulation.error}`,
-					}
-				}
-
-				const assembledTx = assembleTransaction(transaction, simulation).build()
-				assembledTx.sign(adminKeypair)
-
-				const result = await this.server.sendTransaction(assembledTx)
-
-				if (result.status === 'ERROR') {
-					return {
-						success: false,
-						error: `Transaction failed: ${JSON.stringify(result.errorResult)}`,
-					}
-				}
-
-				// Wait for confirmation
-				if (result.status === 'PENDING') {
-					const confirmed = await this.server.getTransaction(result.hash)
-					if (confirmed.status === 'NOT_FOUND') {
-						// Poll a few times
-						for (let i = 0; i < 10; i++) {
-							await new Promise((r) => setTimeout(r, 2000))
-							const check = await this.server.getTransaction(result.hash)
-							if (check.status === 'SUCCESS') {
-								return { success: true }
-							}
-							if (check.status === 'FAILED') {
-								return { success: false, error: 'Transaction failed on-chain' }
-							}
-						}
-					}
-				}
-
-				return { success: true }
-			} catch (error) {
-				logger.error('[GamificationContractService] Error granting role:', error)
-				return {
-					success: false,
-					error: error instanceof Error ? error.message : 'Unknown error',
-				}
-			}
-		}) // end enqueue – grantRole
+	): Promise<GamificationTxResult> {
+		return this.writes.grantRole(contractAddress, accountAddress, role, adminKeypair)
 	}
 
 	/**
-	 * Check if an account has a specific role on a contract.
+	 * Record a reputation event for a user (direct call, same as CPI targets).
+	 * Requires the "recorder" role.
+	 *
+	 * Signature: record_event(caller, user, event_type) -> u32
+	 *            record_event_with_points(caller, user, event_type, points) -> u32
 	 */
-	async hasRole(
-		contractAddress: string,
-		accountAddress: string,
-		role: string,
-	): Promise<{ hasRole: boolean; error?: string }> {
-		try {
-			const args = [
-				nativeToScVal(Address.fromString(accountAddress), { type: 'address' }),
-				nativeToScVal(role, { type: 'symbol' }),
-			]
-
-			const operation = Operation.invokeContractFunction({
-				contract: contractAddress,
-				function: 'has_role',
-				args,
-			})
-
-			const account = await this.server
-				.getAccount(this.recorderKeypair.publicKey())
-				.then((res) => new Account(res.accountId(), res.sequenceNumber()))
-
-			const transaction = new TransactionBuilder(account, {
-				fee: '100',
-				networkPassphrase: this.networkPassphrase,
-			})
-				.addOperation(operation)
-				.setTimeout(60)
-				.build()
-
-			const simulation = await this.server.simulateTransaction(transaction)
-
-			if (Api.isSimulationError(simulation)) {
-				return { hasRole: false, error: simulation.error }
-			}
-
-			// has_role returns Option<u32>: Some(index) means granted, None means not granted
-			if (simulation.result?.retval) {
-				const { scValToNative } = await import('@stellar/stellar-sdk')
-				const result = scValToNative(simulation.result.retval)
-				// None becomes undefined/null, Some(n) becomes a number
-				const granted = result !== undefined && result !== null
-				return { hasRole: granted }
-			}
-
-			return { hasRole: false }
-		} catch (error) {
-			return {
-				hasRole: false,
-				error: error instanceof Error ? error.message : 'Unknown error',
-			}
-		}
+	async recordReputationEvent(
+		reputationContractAddress: string,
+		params: { userAddress: string; eventType: number; points?: number },
+	): Promise<GamificationTxResult<{ totalPoints?: number }>> {
+		return this.writes.recordReputationEvent(reputationContractAddress, params)
 	}
 }

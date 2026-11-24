@@ -2,6 +2,9 @@
 
 import { motion, useReducedMotion } from 'framer-motion'
 import { Badge } from '~/components/base/badge'
+import { KycRequiredGate } from '~/components/sections/kyc/kyc-required-gate'
+import { ReleasedProgressBar } from '~/components/sections/projects/shared'
+import { CAMPAIGN_COMPLETE_DONATION_MESSAGE } from '~/lib/projects/project-status'
 import type { ProjectDetail } from '~/lib/types/project/project-detail.types'
 import { DonationForm, DonationNotices } from './components/donation-form'
 import { EscrowContractInfo } from './components/escrow-contract-info'
@@ -14,14 +17,22 @@ import { useProjectSidebar } from './hooks/use-project-sidebar'
 
 interface ProjectSidebarProps {
 	project: ProjectDetail
+	projectSlug: string
 }
 
-export function ProjectSidebar({ project }: ProjectSidebarProps) {
+export function ProjectSidebar({ project, projectSlug }: ProjectSidebarProps) {
 	const reducedMotion = useReducedMotion()
 	const {
 		form,
 		hasEscrow,
+		isCampaignComplete,
+		isAcceptingDonations,
+		isGoalReached,
+		isDonationReady,
+		isEscrowDataLoading,
 		progressPercentage,
+		displayReleased,
+		releasedProgressPercent,
 		onChainRaised,
 		isFetchingBalance,
 		isMounted,
@@ -32,9 +43,12 @@ export function ProjectSidebar({ project }: ProjectSidebarProps) {
 		connect,
 		disconnect,
 		onSubmit,
+		kycGate,
 		handleToggleFollow,
-		handleShare,
-	} = useProjectSidebar(project)
+		shareUrl,
+		isAuthenticated,
+		signInHref,
+	} = useProjectSidebar(project, projectSlug)
 
 	return (
 		<motion.div
@@ -46,7 +60,23 @@ export function ProjectSidebar({ project }: ProjectSidebarProps) {
 			<div className="p-6">
 				<div className="flex items-center gap-2 mb-2">
 					<h2 className="text-xl font-bold">Support This Project</h2>
-					{hasEscrow ? (
+					{isCampaignComplete ? (
+						<Badge
+							variant="secondary"
+							className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-0"
+							aria-label="This campaign is complete"
+						>
+							Campaign complete
+						</Badge>
+					) : hasEscrow && isGoalReached ? (
+						<Badge
+							variant="secondary"
+							className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-0"
+							aria-label="This project has reached its funding goal"
+						>
+							Goal reached
+						</Badge>
+					) : hasEscrow && isAcceptingDonations ? (
 						<Badge
 							variant="secondary"
 							className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-0"
@@ -65,9 +95,13 @@ export function ProjectSidebar({ project }: ProjectSidebarProps) {
 					)}
 				</div>
 				<p className="mb-4 text-muted-foreground">
-					{hasEscrow
-						? 'Your contribution matters. Join the change.'
-						: 'This project is still setting up secure escrow. Donations will be available soon.'}
+					{isCampaignComplete
+						? CAMPAIGN_COMPLETE_DONATION_MESSAGE
+						: !hasEscrow
+							? 'This project is still setting up secure escrow. Donations will be available soon.'
+							: isGoalReached
+								? 'This project has reached its fundraising goal. Thank you for your support!'
+								: 'Your contribution matters. Join the change.'}
 				</p>
 
 				<ProjectProgressBar
@@ -77,33 +111,69 @@ export function ProjectSidebar({ project }: ProjectSidebarProps) {
 					isFetchingBalance={isFetchingBalance}
 				/>
 
-				<DonationForm project={project} hasEscrow={hasEscrow} form={form} onSubmit={onSubmit} />
+				<ReleasedProgressBar
+					releasedAmount={displayReleased}
+					progressPercentage={releasedProgressPercent}
+					className="mb-3"
+				/>
 
-				<DonationNotices hasEscrow={hasEscrow} />
+				<DonationForm
+					project={project}
+					hasEscrow={hasEscrow}
+					isCampaignComplete={isCampaignComplete}
+					isAcceptingDonations={isAcceptingDonations}
+					isGoalReached={isGoalReached}
+					isDonationReady={isDonationReady}
+					isEscrowDataLoading={isEscrowDataLoading}
+					isAuthenticated={isAuthenticated}
+					signInHref={signInHref}
+					form={form}
+					onSubmit={onSubmit}
+				/>
 
-				{project.escrowContractAddress && (
+				<DonationNotices
+					hasEscrow={hasEscrow}
+					isCampaignComplete={isCampaignComplete}
+					isAcceptingDonations={isAcceptingDonations}
+					isGoalReached={isGoalReached}
+					isAuthenticated={isAuthenticated}
+					signInHref={signInHref}
+				/>
+
+				{isAcceptingDonations && !isGoalReached && project.escrowContractAddress ? (
 					<EscrowContractInfo escrowContractAddress={project.escrowContractAddress} />
-				)}
+				) : null}
 
 				<SidebarActions
 					isFollowing={isFollowing}
 					onToggleFollow={handleToggleFollow}
-					onShare={handleShare}
+					shareUrl={shareUrl}
+					shareTitle={project.title}
+					shareDescription={project.description ?? undefined}
 				/>
 
-				<WalletStatusPanel
-					isMounted={isMounted}
-					isConnected={isConnected}
-					walletName={walletName}
-					address={address}
-					onConnect={connect}
-					onDisconnect={disconnect}
-				/>
+				{isAuthenticated ? (
+					<WalletStatusPanel
+						isMounted={isMounted}
+						isConnected={isConnected}
+						walletName={walletName}
+						address={address}
+						onConnect={connect}
+						onDisconnect={disconnect}
+					/>
+				) : null}
 			</div>
 
 			{project.foundation && <FoundationLink foundation={project.foundation} />}
 
 			<ProjectTagsPanel tags={project.tags} />
+
+			<KycRequiredGate
+				open={kycGate.open}
+				onOpenChange={kycGate.setOpen}
+				userId={kycGate.userId}
+				denial={kycGate.denial}
+			/>
 		</motion.div>
 	)
 }

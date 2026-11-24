@@ -6,6 +6,7 @@ import { getServerSession } from 'next-auth'
 import { logger } from '@/lib/logger'
 import { nextAuthOption } from '~/lib/auth/auth-options'
 import { withRateLimit } from '~/lib/middleware/rate-limit'
+import { requireOnboardingCompleteForAction } from '~/lib/onboarding/guard'
 import { projectCreateFormSchema } from '~/lib/schemas/project.schemas'
 import {
 	buildSocialLinks,
@@ -57,6 +58,14 @@ async function createProjectHandler(req: NextRequest) {
 			)
 		}
 
+		const onboardingFailure = await requireOnboardingCompleteForAction(userId)
+		if (onboardingFailure) {
+			return NextResponse.json(
+				{ error: onboardingFailure.code, message: onboardingFailure.error },
+				{ status: 403 },
+			)
+		}
+
 		// Use service role client for project creation with manual authorization check
 		// This bypasses RLS but we've already verified the user has permission
 		const supabase = supabaseServiceRole
@@ -77,7 +86,19 @@ async function createProjectHandler(req: NextRequest) {
 			socialLinks,
 			image,
 			foundationId,
+			developmentOnly,
+			sourceLocale,
 		} = validation.data
+
+		if (developmentOnly && userRole !== 'admin') {
+			return NextResponse.json(
+				{
+					error: 'Forbidden',
+					message: 'Only administrators can create development-only projects',
+				},
+				{ status: 403 },
+			)
+		}
 
 		// Prepare project data to insert
 		const insertData: TablesInsert<'projects'> = {
@@ -90,6 +111,8 @@ async function createProjectHandler(req: NextRequest) {
 			kindler_id: userId,
 			social_links: buildSocialLinks(website, socialLinks),
 			...(foundationId && { foundation_id: foundationId }),
+			...(developmentOnly && { development_only: true }),
+			source_locale: sourceLocale,
 		}
 
 		// Insert new project and retrieve its ID and slug
@@ -126,18 +149,20 @@ async function createProjectHandler(req: NextRequest) {
 		// Create tag relationships for the new project
 		await upsertTags(project.id, tags ?? [], supabase)
 
-		// Send email + in-app notifications (non-blocking)
-		import('~/lib/email/email-notification-service')
-			.then(({ sendNewProjectEmails }) =>
-				sendNewProjectEmails({
-					projectTitle: title,
-					projectSlug: project.slug ?? '',
-					creatorId: userId,
-				}),
-			)
-			.catch((err) => logger.error('[Project create] Notification error:', err))
+		if (!developmentOnly) {
+			// Notify creator that project is awaiting admin review (non-blocking)
+			import('~/lib/email/notifications/send-new-project-emails')
+				.then(({ sendProjectSubmittedForReviewEmail }) =>
+					sendProjectSubmittedForReviewEmail({
+						projectTitle: title,
+						projectSlug: project.slug ?? '',
+						creatorId: userId,
+					}),
+				)
+				.catch((err) => logger.error('[Project create] Notification error:', err))
+		}
 
-		return NextResponse.json({ slug: project.slug }, { status: 201 })
+		return NextResponse.json({ slug: project.slug, id: project.id }, { status: 201 })
 	} catch (err) {
 		logger.error(err)
 		return NextResponse.json(

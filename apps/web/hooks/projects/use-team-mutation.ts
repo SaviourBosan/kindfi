@@ -45,19 +45,31 @@ export function useTeamMutation() {
 
 	const createMember = useMutation<TeamMemberResponse, Error, CreateTeamMemberRequest>({
 		mutationFn: async (data) => {
+			const body =
+				data.type === 'manual'
+					? {
+							type: 'manual' as const,
+							projectId: data.projectId,
+							fullName: data.fullName,
+							roleTitle: data.roleTitle,
+							bio: data.bio,
+							photoUrl: data.photoUrl,
+							yearsInvolved: data.yearsInvolved,
+						}
+					: {
+							type: 'registered' as const,
+							projectId: data.projectId,
+							userId: data.userId,
+							roleTitle: data.roleTitle,
+							bio: data.bio,
+						}
+
 			const res = await fetch(`/api/projects/${data.projectSlug}/team`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',
 				},
-				body: JSON.stringify({
-					projectId: data.projectId,
-					fullName: data.fullName,
-					roleTitle: data.roleTitle,
-					bio: data.bio,
-					photoUrl: data.photoUrl,
-					yearsInvolved: data.yearsInvolved,
-				}),
+				body: JSON.stringify(body),
 			})
 
 			if (!res.ok) {

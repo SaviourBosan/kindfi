@@ -5,27 +5,9 @@ import { logger } from '@/lib/logger'
 import { nextAuthOption } from '~/lib/auth/auth-options'
 import { limitOffsetQuerySchema } from '~/lib/schemas/common.schemas'
 import { createReferralSchema } from '~/lib/schemas/referral.schemas'
+import { resolveUserStellarAddress } from '~/lib/services/resolve-user-stellar-address'
 import { GamificationContractService } from '~/lib/stellar/gamification-contracts'
 import { validateRequest } from '~/lib/utils/validation'
-
-/**
- * Resolve a user ID to a Stellar address (G... or C...) via devices table.
- * Returns null if no address is found.
- */
-async function resolveUserStellarAddress(
-	supabase: import('@packages/lib/types').TypedSupabaseClient,
-	userId: string,
-): Promise<string | null> {
-	const { data: devices } = await supabase
-		.from('devices')
-		.select('address')
-		.eq('user_id', userId)
-		.not('address', 'eq', '0x')
-		.not('address', 'is', null)
-		.limit(1)
-
-	return devices?.[0]?.address ?? null
-}
 
 /**
  * GET /api/referrals
@@ -55,8 +37,8 @@ export async function GET(req: NextRequest) {
 		// Use service role client to bypass RLS — auth is handled by NextAuth session above
 		const { supabase } = await import('@packages/lib/supabase')
 
-		// Get referrals, statistics, and referred record in parallel
-		const [referralsResult, statsResult, referredResult] = await Promise.all([
+		// Get referrals, statistics, referred record, and referral profile in parallel
+		const [referralsResult, statsResult, referredResult, profileResult] = await Promise.all([
 			supabase
 				.from('referral_records')
 				.select('*', { count: 'exact' })
@@ -65,11 +47,13 @@ export async function GET(req: NextRequest) {
 				.range(offset, offset + limit - 1),
 			supabase.from('referrer_statistics').select('*').eq('referrer_id', session.user.id).single(),
 			supabase.from('referral_records').select('*').eq('referred_id', session.user.id).single(),
+			supabase.from('referral_profiles').select('*').eq('user_id', session.user.id).maybeSingle(),
 		])
 
 		const { data: referrals, error: referralsError, count: referralsCount } = referralsResult
 		const { data: stats, error: statsError } = statsResult
 		const { data: referredRecord } = referredResult
+		const { data: referralProfile } = profileResult
 
 		if (referralsError) {
 			logger.error('Error fetching referrals:', referralsError)
@@ -87,6 +71,9 @@ export async function GET(req: NextRequest) {
 				total_reward_points: 0,
 			},
 			referred_by: referredRecord?.referrer_id || null,
+			is_activated: Boolean(referralProfile),
+			referral_code: referralProfile?.referral_code ?? null,
+			referral_profile: referralProfile ?? null,
 			pagination: { limit, offset, total: referralsCount ?? 0 },
 		})
 	} catch (error) {

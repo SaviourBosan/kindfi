@@ -5,6 +5,7 @@ import { Badge } from '~/components/base/badge'
 import { Button } from '~/components/base/button'
 import { CardContent, CardHeader, CardTitle } from '~/components/base/card'
 import { ProfileSurfaceCard } from '../../profile-surface-card'
+import { DonationSharePopover } from './donation-share-popover'
 import type { DonorProjectWithBalance } from './types'
 
 interface SupportedProjectCardProps {
@@ -15,6 +16,7 @@ interface SupportedProjectCardProps {
 export function SupportedProjectCard({ project, t }: SupportedProjectCardProps) {
 	const percentage = project.percentageComplete ?? 0
 	const contributionAmount = Number(project.contributionAmount)
+	const raisedLabel = project.raised === null ? '…' : `$${Number(project.raised).toLocaleString()}`
 
 	return (
 		<ProfileSurfaceCard
@@ -46,7 +48,7 @@ export function SupportedProjectCard({ project, t }: SupportedProjectCardProps) 
 					<div className="flex justify-between text-sm">
 						<span className="text-muted-foreground">Total Raised</span>
 						<span className="font-semibold">
-							${Number(project.raised).toLocaleString()} / ${Number(project.goal).toLocaleString()}
+							{raisedLabel} / ${Number(project.goal).toLocaleString()}
 						</span>
 					</div>
 					<div className="relative h-2 bg-muted rounded-full overflow-hidden">
@@ -76,12 +78,23 @@ export function SupportedProjectCard({ project, t }: SupportedProjectCardProps) 
 						))}
 					</div>
 				)}
-				<Button asChild variant="outline" size="sm" className="w-full rounded-full">
-					<Link href={`/projects/${project.slug}`}>
-						{t('profile.viewProject')}
-						<ArrowRight className="h-4 w-4 ml-2" />
-					</Link>
-				</Button>
+				<div className="flex gap-2">
+					<Button asChild variant="outline" size="sm" className="flex-1 rounded-full">
+						<Link href={`/projects/${project.slug}`}>
+							{t('profile.viewProject')}
+							<ArrowRight className="h-4 w-4 ml-2" />
+						</Link>
+					</Button>
+					<DonationSharePopover
+						projectTitle={project.title}
+						projectSlug={project.slug}
+						projectDescription={project.description}
+						contributionAmount={contributionAmount}
+						shareLabel={t('profile.shareDonation')}
+						fullWidth
+						className="flex-1 rounded-full"
+					/>
+				</div>
 			</CardContent>
 		</ProfileSurfaceCard>
 	)

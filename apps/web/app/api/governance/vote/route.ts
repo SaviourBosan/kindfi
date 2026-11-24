@@ -6,6 +6,7 @@ import { nextAuthOption } from '~/lib/auth/auth-options'
 import type { NftTier } from '~/lib/governance/types'
 import { getVoteWeight } from '~/lib/governance/vote-weight'
 import { withRateLimit } from '~/lib/middleware/rate-limit'
+import { requireOnboardingCompleteForAction } from '~/lib/onboarding/guard'
 import { castVoteSchema } from '~/lib/schemas/governance.schemas'
 import { validateRequest } from '~/lib/utils/validation'
 
@@ -18,12 +19,19 @@ import { validateRequest } from '~/lib/utils/validation'
  */
 async function voteHandler(req: NextRequest) {
 	try {
-		const session = await getServerSession(nextAuthOption)
+		const [session, body] = await Promise.all([getServerSession(nextAuthOption), req.json()])
 		if (!session?.user?.id) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 		}
 
-		const body = await req.json()
+		const onboardingFailure = await requireOnboardingCompleteForAction(session.user.id)
+		if (onboardingFailure) {
+			return NextResponse.json(
+				{ error: onboardingFailure.code, message: onboardingFailure.error },
+				{ status: 403 },
+			)
+		}
+
 		const validation = validateRequest(castVoteSchema, body)
 		if (!validation.success) {
 			return validation.response
@@ -32,12 +40,16 @@ async function voteHandler(req: NextRequest) {
 
 		const { supabase } = await import('@packages/lib/supabase')
 
-		// 1. Verify the round exists and is active
-		const { data: round, error: roundError } = await supabase
-			.from('governance_rounds')
-			.select('id, status, ends_at')
-			.eq('id', roundId)
-			.single()
+		const [{ data: round, error: roundError }, { data: option, error: optionError }] =
+			await Promise.all([
+				supabase.from('governance_rounds').select('id, status, ends_at').eq('id', roundId).single(),
+				supabase
+					.from('governance_options')
+					.select('id')
+					.eq('id', optionId)
+					.eq('round_id', roundId)
+					.single(),
+			])
 
 		if (roundError || !round) {
 			return NextResponse.json({ error: 'Round not found' }, { status: 404 })
@@ -51,36 +63,27 @@ async function voteHandler(req: NextRequest) {
 			return NextResponse.json({ error: 'This voting round has ended' }, { status: 422 })
 		}
 
-		// 2. Verify option belongs to this round
-		const { data: option, error: optionError } = await supabase
-			.from('governance_options')
-			.select('id')
-			.eq('id', optionId)
-			.eq('round_id', roundId)
-			.single()
-
 		if (optionError || !option) {
 			return NextResponse.json({ error: 'Option not found in this round' }, { status: 404 })
 		}
 
-		// 3. Check for double voting
-		const { data: existingVote } = await supabase
-			.from('governance_votes')
-			.select('id')
-			.eq('round_id', roundId)
-			.eq('user_id', session.user.id)
-			.maybeSingle()
+		const [{ data: existingVote }, { data: nft, error: nftError }] = await Promise.all([
+			supabase
+				.from('governance_votes')
+				.select('id')
+				.eq('round_id', roundId)
+				.eq('user_id', session.user.id)
+				.maybeSingle(),
+			supabase
+				.from('user_nfts')
+				.select('tier, stellar_address')
+				.eq('user_id', session.user.id)
+				.single(),
+		])
 
 		if (existingVote) {
 			return NextResponse.json({ error: 'You have already voted in this round' }, { status: 409 })
 		}
-
-		// 4. Check NFT eligibility + get tier
-		const { data: nft, error: nftError } = await supabase
-			.from('user_nfts')
-			.select('tier, stellar_address')
-			.eq('user_id', session.user.id)
-			.single()
 
 		if (nftError || !nft) {
 			return NextResponse.json(

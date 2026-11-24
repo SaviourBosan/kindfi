@@ -5,7 +5,8 @@ import { logger } from '@/lib/logger'
 import { nextAuthOption } from '~/lib/auth/auth-options'
 import { RateLimiter } from '~/lib/auth/rate-limiter'
 import { questProgressSchema } from '~/lib/schemas/quest.schemas'
-import { GamificationContractService } from '~/lib/stellar/gamification-contracts'
+import { syncQuestProgressOnChain } from '~/lib/services/quest-chain-sync.service'
+import { resolveUserStellarAddress } from '~/lib/services/resolve-user-stellar-address'
 import { validateRequest } from '~/lib/utils/validation'
 
 const rateLimiter = new RateLimiter()
@@ -43,28 +44,13 @@ export async function POST(req: NextRequest) {
 		const supabase = supabaseServiceRole
 
 		// Run independent queries in parallel
-		const [devicesResult, questResult] = await Promise.all([
-			// Get user's Stellar address if not provided
-			user_address
-				? Promise.resolve({ data: null })
-				: supabase
-						.from('devices')
-						.select('address')
-						.eq('user_id', user_id)
-						.not('address', 'eq', '0x')
-						.not('address', 'is', null)
-						.limit(1),
+		const [stellarAddress, questResult] = await Promise.all([
+			resolveUserStellarAddress(supabase, user_id, {
+				overrideAddress: user_address,
+			}),
 			// Get quest definition
 			supabase.from('quest_definitions').select('*').eq('quest_id', quest_id).single(),
 		])
-
-		let stellarAddress = user_address
-		if (!stellarAddress) {
-			const devices = devicesResult.data
-			if (devices && devices.length > 0 && devices[0]?.address) {
-				stellarAddress = devices[0].address
-			}
-		}
 
 		const { data: quest, error: questError } = questResult
 		if (questError || !quest) {
@@ -80,35 +66,24 @@ export async function POST(req: NextRequest) {
 
 		if (stellarAddress && process.env.SOROBAN_PRIVATE_KEY) {
 			try {
-				const contractService = new GamificationContractService()
-				const questContractAddress =
-					quest.contract_address ||
-					process.env.QUEST_CONTRACT_ADDRESS ||
-					process.env.NEXT_PUBLIC_QUEST_CONTRACT_ADDRESS
+				contractResult = await syncQuestProgressOnChain({
+					quest,
+					userAddress: stellarAddress,
+					questId: quest_id,
+					progressValue: progress_value,
+				})
 
-				if (questContractAddress) {
-					contractResult = await contractService.updateQuestProgress(questContractAddress, {
-						userAddress: stellarAddress,
-						questId: quest_id,
-						progressValue: progress_value,
-					})
-
-					if (!contractResult.success) {
-						logger.error(
-							'[Quest API] Failed to update quest progress on-chain:',
-							contractResult.error,
-						)
-						// Continue with database update even if contract call fails
-					} else {
-					}
-				} else {
-					logger.warn('[Quest API] Quest contract address not configured')
+				if (contractResult && !contractResult.success) {
+					logger.error(
+						'[Quest API] Failed to update quest progress on-chain:',
+						contractResult.error,
+					)
+					// Continue with database update even if contract call fails
 				}
 			} catch (error) {
 				logger.error('[Quest API] Error calling quest contract:', error)
 				// Continue with database update even if contract call fails
 			}
-		} else {
 		}
 
 		if (!quest.is_active) {

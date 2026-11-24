@@ -6,11 +6,9 @@ import { getAuthenticatedSession } from '~/lib/auth/server-action-auth'
 import { AppError } from '~/lib/error'
 import { getEtherfuseConfig } from '~/lib/etherfuse/get-etherfuse-config'
 import { resolveEtherfuseOrderContext } from '~/lib/etherfuse/resolve-order-context'
+import { requireKycAuthorization } from '~/lib/kyc/denial'
 import { withRateLimit } from '~/lib/middleware/rate-limit'
-import {
-	etherfuseWithdrawalRequestSchema,
-	etherfuseWithdrawalResponseSchema,
-} from '~/lib/schemas/etherfuse.schemas'
+import { etherfuseWithdrawalRequestSchema } from '~/lib/schemas/etherfuse.schemas'
 import { AuditLogger } from '~/lib/services/audit-logger'
 import { generateUniqueId } from '~/lib/utils/id'
 import { validateRequest } from '~/lib/utils/validation'
@@ -59,6 +57,14 @@ async function offRampHandler(req: NextRequest) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
 		}
 
+		const kycDecision = await requireKycAuthorization({
+			userId: session.user.id,
+			action: 'use_off_ramp',
+			amount: Number(amount),
+			asset: sourceAsset,
+		})
+		if (!kycDecision.ok) return kycDecision.response
+
 		if (!etherfuseCustomerId) {
 			return NextResponse.json(
 				{
@@ -105,8 +111,11 @@ async function offRampHandler(req: NextRequest) {
 
 		if (!quoteResponse.ok) {
 			const errorText = await quoteResponse.text()
-			logger.error('Etherfuse quote creation failed:', errorText)
-			throw new AppError(`Failed to create quote: ${errorText}`, quoteResponse.status)
+			logger.error('Etherfuse quote creation failed', {
+				status: quoteResponse.status,
+				body: errorText,
+			})
+			throw new AppError('Failed to create off-ramp quote', quoteResponse.status)
 		}
 
 		const quoteData = await quoteResponse.json()
@@ -130,8 +139,11 @@ async function offRampHandler(req: NextRequest) {
 
 		if (!orderResponse.ok) {
 			const errorText = await orderResponse.text()
-			logger.error('Etherfuse order creation failed:', errorText)
-			throw new AppError(`Failed to create order: ${errorText}`, orderResponse.status)
+			logger.error('Etherfuse order creation failed', {
+				status: orderResponse.status,
+				body: errorText,
+			})
+			throw new AppError('Failed to create off-ramp order', orderResponse.status)
 		}
 
 		const orderData = await orderResponse.json()

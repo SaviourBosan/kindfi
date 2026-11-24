@@ -1,30 +1,43 @@
 'use client'
 
+import { isPollarOnboardingEnabled } from '@packages/lib/pollar'
 import { Fingerprint } from 'lucide-react'
 import Link from 'next/link'
-import { type ChangeEvent, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { type ChangeEvent, useEffect, useState } from 'react'
 import { Button } from '~/components/base/button'
 import { Input } from '~/components/base/input'
+import { PollarLoginSection } from '~/components/pages/auth/pollar-login-section'
 import { FormAlert } from '~/components/shared/form/form-alert'
 import { FormFieldGroup } from '~/components/shared/form/form-field-group'
 import { FormShell } from '~/components/shared/form/form-shell'
 import { AuthLayout } from '~/components/shared/layout/auth/auth-layout'
 import { PasskeyInfoDialog } from '~/components/shared/passkey-info-dialog'
-import { useSmartAccountAuth } from '~/hooks/passkey/use-smart-account-auth'
+import { usePasskeyAuth } from '~/hooks/passkey/use-passkey-auth'
 import { useFormValidation } from '~/hooks/use-form-validation'
 import { formLayoutClasses } from '~/lib/form/form-styles'
 import { useI18n } from '~/lib/i18n'
+import { savePendingReferralCode } from '~/lib/referral/pending-referral-code'
 
 export function LoginComponent() {
+	const searchParams = useSearchParams()
+	const showPasskeyFlow = !isPollarOnboardingEnabled() || searchParams.get('flow') === 'passkey'
 	const [email, setEmail] = useState('')
 	const { t } = useI18n()
+
+	useEffect(() => {
+		const refCode = searchParams.get('ref')
+		if (refCode) {
+			savePendingReferralCode(refCode)
+		}
+	}, [searchParams])
 
 	const { isEmailInvalid, handleValidation, resetValidation } = useFormValidation({
 		email: true,
 	})
 
 	const { isAuthenticating, authSuccess, authError, handleAuth, isNotRegistered, reset } =
-		useSmartAccountAuth(email)
+		usePasskeyAuth(email)
 
 	const onEmailChange = (e: ChangeEvent<HTMLInputElement>) => {
 		handleValidation(e as ChangeEvent<HTMLInputElement & { name: 'email' }>)
@@ -56,57 +69,67 @@ export function LoginComponent() {
 				}
 			>
 				<form className={formLayoutClasses.stack} aria-label="Sign in" onSubmit={onSubmit}>
-					{isNotRegistered ? (
-						<FormAlert variant="warning">
-							{t('auth.deviceNotFound')}{' '}
-							<Link className="font-medium text-primary hover:underline" href="/sign-up">
-								{t('auth.signUp')}
-							</Link>{' '}
-							{t('auth.first')}.
-						</FormAlert>
+					{isPollarOnboardingEnabled() && !showPasskeyFlow ? (
+						<PollarLoginSection variant="sign-in" legacyHref="/sign-in?flow=passkey" />
 					) : null}
 
-					{authError && !isNotRegistered ? (
-						<FormAlert variant="error">{t('auth.authError')}</FormAlert>
+					{showPasskeyFlow ? (
+						<>
+							{isNotRegistered ? (
+								<FormAlert variant="warning">
+									{t('auth.deviceNotFound')}{' '}
+									<Link className="font-medium text-primary hover:underline" href="/sign-up">
+										{t('auth.signUp')}
+									</Link>{' '}
+									{t('auth.first')}.
+								</FormAlert>
+							) : null}
+
+							{authError && !isNotRegistered ? (
+								<FormAlert variant="error">{t('auth.authError')}</FormAlert>
+							) : null}
+
+							{authSuccess ? (
+								<FormAlert variant="success">{t('auth.authSuccess')}</FormAlert>
+							) : null}
+
+							<FormFieldGroup
+								id="email"
+								label={t('auth.email')}
+								error={isEmailInvalid ? t('auth.invalidEmail') : undefined}
+								required
+							>
+								<Input
+									id="email"
+									name="email"
+									type="email"
+									placeholder={t('auth.emailPlaceholder')}
+									required
+									aria-invalid={isEmailInvalid}
+									onChange={onEmailChange}
+									autoComplete="email"
+								/>
+							</FormFieldGroup>
+
+							<Button
+								size="lg"
+								className="gradient-btn mt-2 w-full text-white"
+								type="submit"
+								aria-live="polite"
+								aria-busy={isAuthenticating}
+								disabled={!email || isAuthenticating || isEmailInvalid}
+							>
+								{isAuthenticating ? (
+									t('auth.authenticating')
+								) : (
+									<>
+										{t('auth.signInWithPasskey')} <Fingerprint className="ml-2 h-4 w-4" />
+									</>
+								)}
+							</Button>
+							<PasskeyInfoDialog />
+						</>
 					) : null}
-
-					{authSuccess ? <FormAlert variant="success">{t('auth.authSuccess')}</FormAlert> : null}
-
-					<FormFieldGroup
-						id="email"
-						label={t('auth.email')}
-						error={isEmailInvalid ? t('auth.invalidEmail') : undefined}
-						required
-					>
-						<Input
-							id="email"
-							name="email"
-							type="email"
-							placeholder={t('auth.emailPlaceholder')}
-							required
-							aria-invalid={isEmailInvalid}
-							onChange={onEmailChange}
-							autoComplete="email"
-						/>
-					</FormFieldGroup>
-
-					<Button
-						size="lg"
-						className="gradient-btn mt-2 w-full text-white"
-						type="submit"
-						aria-live="polite"
-						aria-busy={isAuthenticating}
-						disabled={!email || isAuthenticating || isEmailInvalid}
-					>
-						{isAuthenticating ? (
-							t('auth.authenticating')
-						) : (
-							<>
-								{t('auth.signInWithPasskey')} <Fingerprint className="ml-2 h-4 w-4" />
-							</>
-						)}
-					</Button>
-					<PasskeyInfoDialog />
 				</form>
 			</FormShell>
 		</AuthLayout>

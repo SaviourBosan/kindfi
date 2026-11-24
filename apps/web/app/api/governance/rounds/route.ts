@@ -7,6 +7,7 @@ import {
 	createGovernanceRoundSchema,
 	governanceRoundsQuerySchema,
 } from '~/lib/schemas/governance.schemas'
+import { recordAdminAudit } from '~/lib/services/admin-audit'
 import { GovernanceContractService } from '~/lib/stellar/governance-contract'
 import { validateRequest } from '~/lib/utils/validation'
 
@@ -32,8 +33,10 @@ export async function GET(req: NextRequest) {
 		const { status, limit, offset } = validation.data
 
 		// Auto-activate and close rounds based on current time
-		await supabase.rpc('activate_governance_rounds')
-		await supabase.rpc('close_expired_governance_rounds')
+		await Promise.all([
+			supabase.rpc('activate_governance_rounds'),
+			supabase.rpc('close_expired_governance_rounds'),
+		])
 
 		let query = supabase
 			.from('governance_rounds')
@@ -57,35 +60,36 @@ export async function GET(req: NextRequest) {
 			return NextResponse.json({ error: 'Failed to fetch rounds' }, { status: 500 })
 		}
 
-		// For each round, fetch aggregated vote weights per option
-		const enrichedRounds = await Promise.all(
-			(rounds ?? []).map(async (round) => {
-				const { data: votes } = await supabase
-					.from('governance_votes')
-					.select('option_id, vote_type, vote_weight')
-					.eq('round_id', round.id)
+		// Single bounded query: fetch all votes for all rounds in this page at once
+		const roundIds = (rounds ?? []).map((r) => r.id)
+		const { data: allVotes } =
+			roundIds.length > 0
+				? await supabase
+						.from('governance_votes')
+						.select('round_id, option_id, vote_type, vote_weight')
+						.in('round_id', roundIds)
+				: { data: [] }
 
-				const weightMap: Record<string, { up: number; down: number }> = {}
-				for (const v of votes ?? []) {
-					if (!weightMap[v.option_id]) {
-						weightMap[v.option_id] = { up: 0, down: 0 }
-					}
-					if (v.vote_type === 'up') {
-						weightMap[v.option_id].up += v.vote_weight
-					} else {
-						weightMap[v.option_id].down += v.vote_weight
-					}
-				}
+		// Build nested weight map: { [roundId]: { [optionId]: { up, down } } }
+		const votesByRound: Record<string, Record<string, { up: number; down: number }>> = {}
+		for (const v of allVotes ?? []) {
+			if (!votesByRound[v.round_id]) votesByRound[v.round_id] = {}
+			const roundMap = votesByRound[v.round_id]
+			if (!roundMap[v.option_id]) roundMap[v.option_id] = { up: 0, down: 0 }
+			if (v.vote_type === 'up') roundMap[v.option_id].up += v.vote_weight
+			else roundMap[v.option_id].down += v.vote_weight
+		}
 
-				const enrichedOptions = (round.options ?? []).map((opt: { id: string }) => ({
-					...opt,
-					weighted_upvotes: weightMap[opt.id]?.up ?? 0,
-					weighted_downvotes: weightMap[opt.id]?.down ?? 0,
-				}))
-
-				return { ...round, options: enrichedOptions }
-			}),
-		)
+		// Enrich options synchronously from the pre-built map
+		const enrichedRounds = (rounds ?? []).map((round) => {
+			const weightMap = votesByRound[round.id] ?? {}
+			const enrichedOptions = (round.options ?? []).map((opt: { id: string }) => ({
+				...opt,
+				weighted_upvotes: weightMap[opt.id]?.up ?? 0,
+				weighted_downvotes: weightMap[opt.id]?.down ?? 0,
+			}))
+			return { ...round, options: enrichedOptions }
+		})
 
 		return NextResponse.json({
 			success: true,
@@ -110,9 +114,13 @@ export async function POST(req: NextRequest) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 		}
 
-		const { supabase } = await import('@packages/lib/supabase')
+		const [body, { supabase }] = await Promise.all([req.json(), import('@packages/lib/supabase')])
+		const validation = validateRequest(createGovernanceRoundSchema, body)
+		if (!validation.success) {
+			return validation.response
+		}
+		const { round: roundPayload, options: optionPayloads } = validation.data
 
-		// Verify admin role
 		const { data: profile } = await supabase
 			.from('profiles')
 			.select('role')
@@ -122,13 +130,6 @@ export async function POST(req: NextRequest) {
 		if (profile?.role !== 'admin') {
 			return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 		}
-
-		const body = await req.json()
-		const validation = validateRequest(createGovernanceRoundSchema, body)
-		if (!validation.success) {
-			return validation.response
-		}
-		const { round: roundPayload, options: optionPayloads } = validation.data
 
 		const startsAt = new Date(roundPayload.startsAt)
 		const endsAt = new Date(roundPayload.endsAt)
@@ -220,6 +221,20 @@ export async function POST(req: NextRequest) {
 		} catch (err) {
 			logger.error('[Governance] on-chain recording error:', err)
 		}
+
+		await recordAdminAudit({
+			operation: 'admin_governance_round_created',
+			resourceType: 'governance_round',
+			resourceId: round.id,
+			actorId: session.user.id,
+			status: 'success',
+			newState: status,
+			details: {
+				on_chain: contractRoundId !== null,
+				contract_round_id: contractRoundId,
+				option_count: insertedOptions.length,
+			},
+		})
 
 		return NextResponse.json(
 			{

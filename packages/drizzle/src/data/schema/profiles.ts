@@ -1,8 +1,11 @@
 import { sql } from 'drizzle-orm'
 import {
+	boolean,
+	char,
 	foreignKey,
 	index,
 	integer,
+	jsonb,
 	pgPolicy,
 	pgTable,
 	text,
@@ -14,10 +17,12 @@ import {
 import { usersInAuth } from './auth'
 import {
 	backupState,
+	creatorEntityType,
 	credentialType,
 	deviceType,
 	kycStatusEnum,
 	kycVerificationEnum,
+	onboardingProvider,
 	profileVerificationStatus,
 	userRole,
 } from './enums'
@@ -40,8 +45,37 @@ export const profiles = pgTable(
 		email: text(),
 		nextAuthUserId: uuid('next_auth_user_id'),
 		slug: text('slug'),
+		creatorEntityType: creatorEntityType('creator_entity_type'),
+		headline: text(),
+		country: char({ length: 3 }),
+		websiteUrl: text('website_url'),
+		socialLinks: jsonb('social_links').default({}).notNull(),
+		externalWalletAddress: text('external_wallet_address'),
+		onboardingProvider: onboardingProvider('onboarding_provider')
+			.default('legacy_passkey')
+			.notNull(),
+		pollarUserId: text('pollar_user_id'),
+		pollarWalletAddress: text('pollar_wallet_address'),
+		pollarWalletActivatedAt: timestamp('pollar_wallet_activated_at', {
+			withTimezone: true,
+			mode: 'string',
+		}),
+		onboardingStep: text('onboarding_step').default('role').notNull(),
+		onboardingCompletedAt: timestamp('onboarding_completed_at', {
+			withTimezone: true,
+			mode: 'string',
+		}),
+		productTourCompletedAt: timestamp('product_tour_completed_at', {
+			withTimezone: true,
+			mode: 'string',
+		}),
+		onboardingVersion: integer('onboarding_version').default(1).notNull(),
 	},
 	(table) => [
+		index('idx_profiles_creator_entity_type').using(
+			'btree',
+			table.creatorEntityType.asc().nullsLast().op('enum_ops'),
+		),
 		uniqueIndex('profiles_slug_key').using('btree', table.slug.asc().nullsLast().op('text_ops')),
 		index('idx_profiles_next_auth_user_id').using(
 			'btree',

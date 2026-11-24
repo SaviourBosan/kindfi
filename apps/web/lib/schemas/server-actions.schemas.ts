@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { KINDFI_PLATFORM_FEE_PERCENT } from '~/lib/utils/escrow/platform-fee'
 
 const escrowStatusEnum = z.enum(['NEW', 'FUNDED', 'ACTIVE', 'COMPLETED', 'DISPUTED', 'CANCELLED'])
 
@@ -55,6 +56,7 @@ export const resetPasswordInputSchema = z
 export const createSessionInputSchema = z.object({
 	userId: z.string().uuid('Invalid userId'),
 	email: z.string().email('A valid email is required'),
+	callbackUrl: z.string().optional(),
 })
 
 const stellarAddressSchema = z
@@ -79,7 +81,7 @@ const escrowDataSchema = z
 			platformAddress: stellarAddressSchema,
 			releaseSigner: stellarAddressSchema,
 		}),
-		platformFee: z.number().min(0).max(100),
+		platformFee: z.literal(KINDFI_PLATFORM_FEE_PERCENT),
 		milestones: z.array(escrowMilestoneSchema).optional(),
 		amount: z.number().positive().optional(),
 		receiver: stellarAddressSchema.optional(),
@@ -113,6 +115,21 @@ export const saveEscrowContractInputSchema = z.object({
 	escrowData: escrowDataSchema,
 })
 
+const stellarContractIdSchema = z
+	.string()
+	.min(1, 'Contract ID is required')
+	.regex(/^C[A-Z2-7]{55}$/, 'Invalid Stellar contract ID')
+
+export const syncEscrowToDatabaseInputSchema = z.object({
+	projectId: z.string().uuid('Invalid projectId'),
+	contractId: stellarContractIdSchema,
+	escrowSnapshot: escrowDataSchema.optional(),
+	txHash: z
+		.string()
+		.regex(/^[A-Fa-f0-9]{64}$/, 'Invalid transaction hash')
+		.optional(),
+})
+
 export const createFoundationInputSchema = z.object({
 	name: z.string().min(1, 'Name is required').max(120),
 	description: z.string().min(1, 'Description is required').max(2000),
@@ -130,6 +147,17 @@ export const createFoundationInputSchema = z.object({
 	vision: z.string().max(2000).optional(),
 	websiteUrl: z.string().url('Invalid website URL').optional().or(z.literal('')),
 	socialLinks: z.record(z.string(), z.string().url('Invalid URL')).optional(),
+})
+
+export const updateProfileRoleInputSchema = z.object({
+	role: z.enum(['creator', 'donor']),
+})
+
+export const updateDeclaredCountryInputSchema = z.object({
+	countryCode: z
+		.string()
+		.length(2, 'Country code must be an ISO 3166-1 alpha-2 code')
+		.regex(/^[A-Za-z]{2}$/, 'Country code must be an ISO 3166-1 alpha-2 code'),
 })
 
 export { stellarAddressSchema }

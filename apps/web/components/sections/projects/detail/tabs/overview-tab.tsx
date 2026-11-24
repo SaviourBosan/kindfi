@@ -5,6 +5,7 @@ import parse from 'html-react-parser'
 import { Download } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '~/components/base/button'
+import { ProjectVideoEmbed } from '~/components/sections/projects/detail/project-video-embed'
 import { FileIcon } from '~/components/sections/projects/shared'
 import type { ProjectPitch } from '~/lib/types/project/project-detail.types'
 
@@ -24,13 +25,32 @@ export function OverviewTab({ pitch }: OverviewTabProps) {
 		}
 	}, [])
 
-	// Sanitize user-provided HTML to prevent XSS before parsing/rendering
+	// Sanitize user-provided HTML to prevent XSS before parsing/rendering.
+	// Images from the Supabase story-images bucket are allowed; all other img src values are stripped.
 	const safeStory = useMemo(() => {
 		if (!pitch.story) return ''
 
-		// Only sanitize in the browser where DOMPurify is available
 		if (DOMPurify) {
-			return DOMPurify.sanitize(pitch.story)
+			const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
+			const allowedPrefix = `${supabaseUrl}/storage/v1/object/public/project_story_images/`
+
+			DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+				if (node.tagName === 'IMG') {
+					const src = node.getAttribute('src') ?? ''
+					if (!src.startsWith(allowedPrefix)) {
+						node.removeAttribute('src')
+					}
+				}
+			})
+
+			const sanitized = DOMPurify.sanitize(pitch.story, {
+				ADD_TAGS: ['img'],
+				ADD_ATTR: ['src', 'alt', 'width', 'height', 'loading'],
+				FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
+			})
+
+			DOMPurify.removeHooks('afterSanitizeAttributes')
+			return sanitized
 		}
 
 		// Fallback for SSR: return original story (will be sanitized on client hydration)
@@ -54,16 +74,8 @@ export function OverviewTab({ pitch }: OverviewTabProps) {
 			{pitch.videoUrl && (
 				<div className="mb-8">
 					<h2 className="text-2xl font-bold mb-4">Project Video</h2>
-					<div className="aspect-video rounded-lg overflow-hidden">
-						<iframe
-							src={pitch.videoUrl}
-							title="Project Video"
-							className="w-full h-full"
-							allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-							allowFullScreen
-							// Keep sandbox to further reduce risk when embedding
-							sandbox="allow-same-origin allow-scripts allow-presentation"
-						/>
+					<div className="aspect-video rounded-lg overflow-hidden bg-muted">
+						<ProjectVideoEmbed url={pitch.videoUrl} />
 					</div>
 				</div>
 			)}

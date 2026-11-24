@@ -3,15 +3,18 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { logger } from '@/lib/logger'
 import { nextAuthOption } from '~/lib/auth/auth-options'
+import { evaluateCountryRiskAuthorization } from '~/lib/compliance/authorization-service'
+import { requireKycAuthorization } from '~/lib/kyc/denial'
 import { withRateLimit } from '~/lib/middleware/rate-limit'
+import { canAccessDevelopmentOnlyProject } from '~/lib/queries/projects/development-only-access'
 import { createContributionSchema } from '~/lib/schemas/contribution.schemas'
 import {
 	checkDuplicateContribution,
-	createContributionRecord,
-	incrementProjectAmount,
+	createContributionWithProjectUpdate,
 	resolveProjectId,
 	sendContributionNotifications,
 	triggerGamificationUpdates,
+	validateContributionAllowed,
 } from '~/lib/services/contribution-service'
 import { validateRequest } from '~/lib/utils/validation'
 
@@ -19,17 +22,16 @@ const MAX_CONTRIBUTION_AMOUNT = 1_000_000
 
 async function createContributionHandler(req: NextRequest) {
 	try {
-		const session = await getServerSession(nextAuthOption)
+		const [session, body] = await Promise.all([getServerSession(nextAuthOption), req.json()])
 		if (!session?.user?.id) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 		}
 
-		const body = await req.json()
 		const validation = validateRequest(createContributionSchema, body)
 		if (!validation.success) {
 			return validation.response
 		}
-		const { projectId, contractId, amount, transactionHash } = validation.data
+		const { projectId, contractId, amount, transactionHash, walletAddress } = validation.data
 
 		const numericAmount = Number(amount)
 
@@ -48,6 +50,31 @@ async function createContributionHandler(req: NextRequest) {
 			)
 		}
 
+		const countryRiskDecision = await evaluateCountryRiskAuthorization({
+			userId: session.user.id,
+			action: 'donate',
+			amount: numericAmount,
+		})
+		if (!countryRiskDecision.allowed) {
+			return NextResponse.json(
+				{
+					error:
+						'This donation is currently unavailable for your account. Please complete verification, wait for manual review, or contact support.',
+					requiredAction: countryRiskDecision.requiredAction,
+				},
+				{ status: 403 },
+			)
+		}
+
+		const kycDecision = await requireKycAuthorization({
+			userId: session.user.id,
+			action: 'donate',
+			amount: numericAmount,
+		})
+		if (!kycDecision.ok) {
+			return kycDecision.response
+		}
+
 		const projectResolution = await resolveProjectId({ contractId, projectId })
 		if (!projectResolution.success) {
 			return NextResponse.json(
@@ -57,11 +84,27 @@ async function createContributionHandler(req: NextRequest) {
 		}
 		const finalProjectId = projectResolution.projectId
 
-		const duplicateCheck = await checkDuplicateContribution({
-			transactionHash,
-			projectId: finalProjectId,
-			contributorId: session.user.id,
-		})
+		if (!finalProjectId) {
+			return NextResponse.json({ error: 'Project ID is required' }, { status: 400 })
+		}
+
+		const devAccessAllowed = await canAccessDevelopmentOnlyProject(finalProjectId, session.user.id)
+		if (!devAccessAllowed) {
+			return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+		}
+
+		const [contributionCheck, duplicateCheck] = await Promise.all([
+			validateContributionAllowed(finalProjectId, contractId),
+			checkDuplicateContribution({
+				transactionHash,
+				projectId: finalProjectId,
+				contributorId: session.user.id,
+			}),
+		])
+		if (!contributionCheck.allowed) {
+			return NextResponse.json({ error: contributionCheck.error }, { status: 403 })
+		}
+
 		if (duplicateCheck.duplicate) {
 			return NextResponse.json(
 				{
@@ -73,7 +116,7 @@ async function createContributionHandler(req: NextRequest) {
 			)
 		}
 
-		const contributionResult = await createContributionRecord({
+		const contributionResult = await createContributionWithProjectUpdate({
 			projectId: finalProjectId,
 			contributorId: session.user.id,
 			amount: numericAmount,
@@ -88,11 +131,6 @@ async function createContributionHandler(req: NextRequest) {
 			)
 		}
 
-		await incrementProjectAmount({
-			projectId: finalProjectId,
-			amount: numericAmount,
-		})
-
 		sendContributionNotifications({
 			projectId: finalProjectId,
 			contributorId: session.user.id,
@@ -105,6 +143,7 @@ async function createContributionHandler(req: NextRequest) {
 			session,
 			amount,
 			req,
+			walletAddress,
 		}).catch((error) => {
 			logger.error('[Gamification] Unhandled error in gamification updates:', error)
 		})

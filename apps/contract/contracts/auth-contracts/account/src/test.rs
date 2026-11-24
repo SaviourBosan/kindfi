@@ -80,6 +80,7 @@ impl Account {
     fn new() -> Self {
         let env = Env::default();
         let auth_contract = Address::generate(&env);
+        let native_token = Address::generate(&env);
         let init_device_id = generate_device_id(&env);
 
         env.cost_estimate().budget().reset_unlimited();
@@ -87,8 +88,10 @@ impl Account {
 
         let (sk, vk, pk) = generate_keypair(&env);
         log!(&env, "a log entry", pk, symbol_short!("another"));
-        // let account_address = env.register(AccountContract, (&init_device_id, &pk, &auth_contract));
-        let account_address = env.register(AccountContract, (&init_device_id, &pk, &auth_contract));
+        let account_address = env.register(
+            AccountContract,
+            (&init_device_id, &pk, &auth_contract, &native_token),
+        );
 
         let client = AccountContractClient::new(&env, &account_address);
 

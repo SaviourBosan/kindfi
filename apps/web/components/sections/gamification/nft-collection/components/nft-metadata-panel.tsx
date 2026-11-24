@@ -11,17 +11,19 @@ import { AttrChip } from '../utils/helpers'
 interface NftMetadataPanelProps {
 	nft: NFT | undefined
 	dbNft: UserNFTRecord | null
+	imageUri: string | null
 	userStats: UserStats | undefined
 	tier: Tier
 	showMetadata: boolean
 	onToggle: () => void
-	smartAccountAddress: string | undefined
+	smartAccountAddress: string | null
 	nftContractAddress: string | undefined
 }
 
 export function NftMetadataPanel({
 	nft,
 	dbNft,
+	imageUri,
 	userStats,
 	tier,
 	showMetadata,
@@ -70,16 +72,16 @@ export function NftMetadataPanel({
 								<span className="text-right">{nft.metadata.description}</span>
 							</div>
 						)}
-						{nft?.metadata?.image_uri && (
+						{(nft?.metadata?.image_uri || imageUri) && (
 							<div className="flex justify-between gap-2">
 								<span className="text-muted-foreground shrink-0">Image URI</span>
 								<a
-									href={nft.metadata.image_uri}
+									href={nft?.metadata?.image_uri || imageUri || '#'}
 									target="_blank"
 									rel="noopener noreferrer"
 									className="text-primary hover:underline text-xs truncate max-w-[200px]"
 								>
-									{nft.metadata.image_uri}
+									{nft?.metadata?.image_uri || imageUri}
 								</a>
 							</div>
 						)}
