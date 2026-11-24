@@ -23,11 +23,19 @@ use stellar_tokens::non_fungible::{burnable::NonFungibleBurnable, Base, NonFungi
 use crate::errors::Error;
 use crate::events::{MetadataUpdatedEventData};
 use crate::types::NFTMetadata;
-use kindfi_ttl::{INSTANCE_TTL_AMOUNT, INSTANCE_TTL_THRESHOLD};
 
 // ============================================================================
 // Constants
 // ============================================================================
+
+/// Number of ledgers in a day (assuming ~5 second block time)
+const DAY_IN_LEDGERS: u32 = 17280;
+
+/// TTL extension amount for instance storage (30 days)
+const INSTANCE_TTL_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+
+/// TTL threshold before extending (29 days)
+const INSTANCE_TTL_THRESHOLD: u32 = INSTANCE_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 /// Role identifier for addresses that can mint NFTs.
 pub const MINTER_ROLE: &str = "minter";

@@ -31,7 +31,14 @@ use crate::types::{StreakInfo, StreakPeriod};
 // Constants
 // ============================================================================
 
-use kindfi_ttl::{DAY_IN_LEDGERS, INSTANCE_TTL_AMOUNT, INSTANCE_TTL_THRESHOLD};
+/// Number of ledgers in a day (assuming ~5 second block time)
+const DAY_IN_LEDGERS: u32 = 17280;
+
+/// TTL extension amount for instance storage (30 days)
+const INSTANCE_TTL_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+
+/// TTL threshold before extending (29 days)
+const INSTANCE_TTL_THRESHOLD: u32 = INSTANCE_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 /// Number of ledgers in a week (7 days)
 const WEEK_IN_LEDGERS: u32 = 7 * DAY_IN_LEDGERS;

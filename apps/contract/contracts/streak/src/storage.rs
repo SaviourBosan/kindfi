@@ -1,7 +1,6 @@
 use soroban_sdk::{Address, Env};
 
 use crate::types::{StreakInfo, StreakPeriod, StorageKey};
-use kindfi_ttl::{PERSISTENT_TTL_AMOUNT, PERSISTENT_TTL_THRESHOLD};
 
 /// Check if contract is initialized.
 pub fn is_initialized(e: &Env) -> bool {
@@ -53,5 +52,5 @@ pub fn set_user_streak(e: &Env, user: &Address, streak: &StreakInfo) {
     // Extend TTL for persistent storage (30 days)
     e.storage()
         .persistent()
-        .extend_ttl(&StorageKey::UserStreak(user.clone(), streak.period), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
+        .extend_ttl(&StorageKey::UserStreak(user.clone(), streak.period), 518400, 518400);
 }

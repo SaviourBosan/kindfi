@@ -1,7 +1,0 @@
-[package]
-name = "kindfi-ttl"
-edition.workspace = true
-repository.workspace = true
-
-[dependencies]
-soroban-sdk = { workspace = true }

@@ -7,9 +7,8 @@ name = "account_contract"
 version = "0.1.0"
 dependencies = [
  "hex",
- "kindfi-ttl",
  "p256",
- "rand",
+ "rand 0.9.2",
  "serde",
  "serde-json-core",
  "soroban-sdk",
@@ -19,8 +18,7 @@ dependencies = [
 name = "account_factory"
 version = "0.1.0"
 dependencies = [
- "kindfi-ttl",
- "rand",
+ "rand 0.8.5",
  "soroban-sdk",
 ]
 
@@ -169,7 +167,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
 dependencies = [
  "num-traits",
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -179,9 +177,8 @@ dependencies = [
  "account_contract",
  "account_factory",
  "hex",
- "kindfi-ttl",
  "p256",
- "rand",
+ "rand 0.8.5",
  "rand_chacha 0.9.0",
  "serde",
  "serde-json-core",
@@ -686,7 +683,6 @@ dependencies = [
 name = "governance"
 version = "0.0.0"
 dependencies = [
- "kindfi-ttl",
  "soroban-sdk",
  "stellar-access",
  "stellar-macros",
@@ -860,13 +856,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kindfi-ttl"
-version = "0.0.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -905,7 +894,6 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 name = "nft-kindfi"
 version = "0.0.0"
 dependencies = [
- "kindfi-ttl",
  "soroban-sdk",
  "stellar-access",
  "stellar-macros",
@@ -1047,7 +1035,6 @@ dependencies = [
 name = "quest"
 version = "0.0.0"
 dependencies = [
- "kindfi-ttl",
  "soroban-sdk",
  "stellar-access",
  "stellar-macros",
@@ -1077,6 +1064,16 @@ dependencies = [
  "libc",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
+dependencies = [
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -1141,7 +1138,6 @@ dependencies = [
 name = "referral"
 version = "0.0.0"
 dependencies = [
- "kindfi-ttl",
  "soroban-sdk",
  "stellar-access",
  "stellar-macros",
@@ -1152,7 +1148,6 @@ name = "reputation"
 version = "0.0.0"
 dependencies = [
  "itoa",
- "kindfi-ttl",
  "soroban-sdk",
  "stellar-access",
  "stellar-macros",
@@ -1436,7 +1431,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "p256",
- "rand",
+ "rand 0.8.5",
  "rand_chacha 0.3.1",
  "sec1",
  "sha2",
@@ -1490,7 +1485,7 @@ dependencies = [
  "ctor",
  "derive_arbitrary",
  "ed25519-dalek",
- "rand",
+ "rand 0.8.5",
  "rustc_version",
  "serde",
  "serde_json",
@@ -1653,7 +1648,6 @@ dependencies = [
 name = "streak"
 version = "0.0.0"
 dependencies = [
- "kindfi-ttl",
  "soroban-sdk",
  "stellar-access",
  "stellar-macros",

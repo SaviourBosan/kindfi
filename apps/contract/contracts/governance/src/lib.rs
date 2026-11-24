@@ -28,11 +28,14 @@ use crate::storage::{
     set_reputation_contract, set_round, set_user_vote,
 };
 use crate::types::{GovernanceOption, GovernanceRound, NftTier, RoundStatus, UserVote, VoteType};
-use kindfi_ttl::{INSTANCE_TTL_AMOUNT, INSTANCE_TTL_THRESHOLD};
 
 // ============================================================================
 // Constants
 // ============================================================================
+
+const DAY_IN_LEDGERS: u32 = 17_280;
+const INSTANCE_TTL_AMOUNT: u32 = 60 * DAY_IN_LEDGERS;
+const INSTANCE_TTL_THRESHOLD: u32 = INSTANCE_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 /// Role identifier for addresses that can create rounds and add options.
 pub const ADMIN_ROLE: &str = "admin";

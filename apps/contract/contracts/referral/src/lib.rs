@@ -32,7 +32,14 @@ use crate::types::{ReferralRecord, ReferralStatus, ReferrerStats};
 // Constants
 // ============================================================================
 
-use kindfi_ttl::{INSTANCE_TTL_AMOUNT, INSTANCE_TTL_THRESHOLD};
+/// Number of ledgers in a day (assuming ~5 second block time)
+const DAY_IN_LEDGERS: u32 = 17280;
+
+/// TTL extension amount for instance storage (30 days)
+const INSTANCE_TTL_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+
+/// TTL threshold before extending (29 days)
+const INSTANCE_TTL_THRESHOLD: u32 = INSTANCE_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 /// Points awarded for onboarding (50 points)
 const ONBOARDING_REWARD_POINTS: u32 = 50;

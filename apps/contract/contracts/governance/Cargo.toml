@@ -14,7 +14,6 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
-kindfi-ttl = { workspace = true }
 stellar-access = { workspace = true }
 stellar-macros = { workspace = true }
 

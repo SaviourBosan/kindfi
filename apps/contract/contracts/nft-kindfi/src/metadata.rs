@@ -1,8 +1,12 @@
 use soroban_sdk::Env;
-use kindfi_ttl::{PERSISTENT_TTL_AMOUNT, PERSISTENT_TTL_THRESHOLD};
 
 use crate::events::MetadataSetEventData;
 use crate::types::{NFTMetadata, StorageKey};
+
+/// TTL constants for metadata storage (30 days in ledgers)
+const DAY_IN_LEDGERS: u32 = 17280;
+const METADATA_TTL_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+const METADATA_TTL_THRESHOLD: u32 = METADATA_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 /// Validates that the metadata fields meet minimum requirements.
 /// Panics if validation fails.
@@ -19,7 +23,7 @@ pub fn set_metadata(e: &Env, token_id: u32, metadata: &NFTMetadata) {
     e.storage().persistent().set(&key, metadata);
     e.storage()
         .persistent()
-        .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
+        .extend_ttl(&key, METADATA_TTL_THRESHOLD, METADATA_TTL_AMOUNT);
     MetadataSetEventData {
         token_id,
         metadata: metadata.clone(),
@@ -35,7 +39,7 @@ pub fn get_metadata(e: &Env, token_id: u32) -> Option<NFTMetadata> {
     if metadata.is_some() {
         e.storage()
             .persistent()
-            .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
+            .extend_ttl(&key, METADATA_TTL_THRESHOLD, METADATA_TTL_AMOUNT);
     }
 
     metadata

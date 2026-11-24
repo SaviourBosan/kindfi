@@ -1,7 +1,14 @@
 use soroban_sdk::{Address, Env};
-use kindfi_ttl::{PERSISTENT_TTL_AMOUNT, PERSISTENT_TTL_THRESHOLD};
 
 use crate::types::{GovernanceOption, GovernanceRound, StorageKey, UserVote};
+
+// ============================================================================
+// TTL Constants  (~5 second ledger time)
+// ============================================================================
+
+const DAY_IN_LEDGERS: u32 = 17_280;
+const PERSISTENT_TTL_AMOUNT: u32 = 60 * DAY_IN_LEDGERS;
+const PERSISTENT_TTL_THRESHOLD: u32 = PERSISTENT_TTL_AMOUNT - DAY_IN_LEDGERS;
 
 // ============================================================================
 // Initialization
