@@ -1,4 +1,7 @@
 #![no_std]
+#[cfg(test)]
+extern crate std;
+
 use core::cmp::min;
 use soroban_sdk::{
     auth::{Context},
@@ -430,4 +433,15 @@ impl AuthController {
 }
 
 mod test;
+
+#[cfg(all(test, account_contract_wasm))]
 mod test_auth;
+
+#[cfg(all(test, not(account_contract_wasm)))]
+#[test]
+fn auth_controller_integration_tests_skipped_without_prebuilt_account_contract() {
+    std::eprintln!(
+        "Skipping auth-controller integration tests: run `stellar contract build` from \
+         apps/contract to generate target/wasm32v1-none/release/account_contract.wasm."
+    );
+}
