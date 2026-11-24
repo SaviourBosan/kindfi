@@ -1,6 +1,7 @@
 use soroban_sdk::{Address, Env, Vec};
 
 use crate::types::{ReferralRecord, ReferrerStats, StorageKey};
+use kindfi_ttl::{PERSISTENT_TTL_AMOUNT, PERSISTENT_TTL_THRESHOLD};
 
 /// Check if contract is initialized.
 pub fn is_initialized(e: &Env) -> bool {
@@ -52,7 +53,7 @@ pub fn set_referral_record(e: &Env, record: &ReferralRecord) {
     // Extend TTL for persistent storage (30 days)
     e.storage()
         .persistent()
-        .extend_ttl(&StorageKey::ReferralRecord(record.referred.clone()), 518400, 518400);
+        .extend_ttl(&StorageKey::ReferralRecord(record.referred.clone()), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
 }
 
 /// Get referrer statistics.
@@ -71,7 +72,7 @@ pub fn set_referrer_stats(e: &Env, referrer: &Address, stats: &ReferrerStats) {
     // Extend TTL
     e.storage()
         .persistent()
-        .extend_ttl(&StorageKey::ReferrerStats(referrer.clone()), 518400, 518400);
+        .extend_ttl(&StorageKey::ReferrerStats(referrer.clone()), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
 }
 
 /// Get referrer's referrals list.
@@ -93,5 +94,5 @@ pub fn add_referrer_referral(e: &Env, referrer: &Address, referred: &Address) {
     // Extend TTL
     e.storage()
         .persistent()
-        .extend_ttl(&StorageKey::ReferrerReferrals(referrer.clone()), 518400, 518400);
+        .extend_ttl(&StorageKey::ReferrerReferrals(referrer.clone()), PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_AMOUNT);
 }
