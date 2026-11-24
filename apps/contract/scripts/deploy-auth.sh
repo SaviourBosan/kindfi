@@ -80,16 +80,7 @@ case $NETWORK in
 esac
 
 echo "🛠️  Building auth contracts with Stellar CLI..."
-
-# Build each contract individually using stellar contract build
-echo "Building Account Contract..."
-cargo build --target wasm32-unknown-unknown --release --manifest-path ./contracts/auth-contracts/account/Cargo.toml || { echo "🔴 Failed to build Account Contract"; exit 1; }
-
-echo "Building Auth Controller Contract..."
-cargo build --target wasm32-unknown-unknown --release --manifest-path ./contracts/auth-contracts/auth-controller/Cargo.toml || { echo "🔴 Failed to build Auth Controller Contract"; exit 1; }
-
-echo "Building Account Factory Contract..."
-cargo build --target wasm32-unknown-unknown --release --manifest-path ./contracts/auth-contracts/account-factory/Cargo.toml || { echo "🔴 Failed to build Account Factory Contract"; exit 1; }
+stellar contract build || { echo "🔴 Failed to build auth contracts"; exit 1; }
 
 echo "✅ All contracts built successfully!"
 
@@ -98,7 +89,7 @@ echo "📦 Deploying Auth Controller Contract..."
 AUTH_CONTROLLER_WASM_HASH=$(stellar contract upload \
     --network "$NETWORK" \
     --source "$SOURCE" \
-    --wasm target/wasm32-unknown-unknown/release/auth_controller.wasm)
+    --wasm target/wasm32v1-none/release/auth_controller.wasm)
 
 AUTH_CONTROLLER_CONTRACT_ID=$(stellar contract deploy \
     --network "$NETWORK" \
@@ -116,7 +107,7 @@ echo "📦 Deploying Account Contract..."
 ACCOUNT_WASM_HASH=$(stellar contract upload \
     --network "$NETWORK" \
     --source "$SOURCE" \
-    --wasm target/wasm32-unknown-unknown/release/account_contract.wasm)
+    --wasm target/wasm32v1-none/release/account_contract.wasm)
 
 # Convert credential ID to 32-byte hex hash (SHA-256 of the credential ID)
 CREDENTIAL_ID="8b5k8pR3N5o7JEvD4Aw70_738E8wBEQp6DT_vLf4Tp1mLnKkVonWTpKcmRTS1f_ndhKYLooSz2XFMXXaauZCqQ"
@@ -170,7 +161,7 @@ echo "📦 Deploying Account Factory Contract..."
 ACCOUNT_FACTORY_WASM_HASH=$(stellar contract upload \
     --network "$NETWORK" \
     --source "$SOURCE" \
-    --wasm target/wasm32-unknown-unknown/release/account_factory.wasm)
+    --wasm target/wasm32v1-none/release/account_factory.wasm)
 
 ACCOUNT_FACTORY_CONTRACT_ID=$(stellar contract deploy \
     --network "$NETWORK" \

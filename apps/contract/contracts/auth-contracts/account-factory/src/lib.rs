@@ -1,4 +1,7 @@
 #![no_std]
+#[cfg(test)]
+extern crate std;
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, symbol_short, vec, Address, BytesN, Env, Symbol,
 };
@@ -72,4 +75,14 @@ impl AccountFactory {
     }
 }
 
+#[cfg(all(test, account_contract_wasm))]
 mod test;
+
+#[cfg(all(test, not(account_contract_wasm)))]
+#[test]
+fn account_factory_tests_skipped_without_prebuilt_account_contract() {
+    std::eprintln!(
+        "Skipping account-factory integration tests: run `stellar contract build` from \
+         apps/contract to generate target/wasm32v1-none/release/account_contract.wasm."
+    );
+}

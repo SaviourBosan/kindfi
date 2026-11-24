@@ -1,6 +1,8 @@
 #![cfg(test)]
 extern crate std;
 
+use std::format;
+
 use p256::ecdsa::{
     signature::Signer as P256Signer, Signature as P256Signature, SigningKey as P256SigningKey,
     VerifyingKey as P256VerifyingKey,
@@ -34,10 +36,10 @@ use account_factory::{events::AccountDeployEventData, AccountFactory, AccountFac
 mod account_contract_mod {
     use super::Context;
     soroban_sdk::contractimport!(
-        file = "../../../target/wasm32-unknown-unknown/release/account_contract.wasm"
+        file = "../../../target/wasm32v1-none/release/account_contract.wasm"
     );
 }
-mod base64_url;
+use crate::base64_url;
 
 // A secure key storage for WebAuthn-compatible Secp256r1 keys
 pub struct SecureKeyStorage {
@@ -53,7 +55,11 @@ impl SecureKeyStorage {
     fn get_public_key(&self, env: &Env) -> BytesN<65> {
         let (_, verifying_key) = self.get_secp256r1_keypair();
         let encoded_point = verifying_key.to_encoded_point(false); // Uncompressed format
-        BytesN::from_array(env, encoded_point.as_bytes())
+        let public_key_bytes: &[u8; 65] = encoded_point
+            .as_bytes()
+            .try_into()
+            .expect("uncompressed public key must be 65 bytes");
+        BytesN::from_array(env, public_key_bytes)
     }
 
     // Generate secp256r1 keypair for signing
